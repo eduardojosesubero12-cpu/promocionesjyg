@@ -1,6 +1,6 @@
 import React, { useMemo, useRef, useState } from "react";
 import QRCode from "react-qr-code";
-import { toPng } from "html-to-image";
+import { toJpeg } from "html-to-image";
 import {
   CheckCircle2, Download, FileText, Loader2, Printer, Search, Smartphone,
   Ticket as TicketIcon, School, Users,
@@ -211,7 +211,7 @@ export function Ticket({ est, escuelaNombre, docenteNombre, tasaHoy, now }: {
 
 /* ---------- Página de Facturación ---------- */
 export default function Facturas() {
-  const { db, tasa, param, setParam, addMensaje, toast, success } = useApp();
+  const { db, tasa, param, setParam, addMensaje, toast, success, dark } = useApp();
   const [q, setQ] = useState("");
   const [fEscuela, setFEscuela] = useState("");
   const [printEst, setPrintEst] = useState<Estudiante | null>(null);
@@ -270,15 +270,33 @@ export default function Facturas() {
     success("Ticket enviado por WhatsApp");
   };
 
-  /* ---------- Captura del ticket como imagen (PNG) ---------- */
+  /* ---------- Captura completa del ticket como imagen (JPG) ---------- */
   const capturar = async (): Promise<Blob | null> => {
     const node = ticketRef.current;
     if (!node) { toast("Selecciona un estudiante primero", "warn"); return null; }
     try {
-      const dataUrl = await toPng(node, { pixelRatio: 3, cacheBust: true });
+      await document.fonts.ready;
+      // Congela hover/animaciones para que la captura no salga desplazada ni cortada
+      node.classList.add("capturando");
+      await new Promise((r) => setTimeout(r, 140));
+      const rect = node.getBoundingClientRect();
+      const w = Math.ceil(rect.width);
+      const h = Math.ceil(rect.height);
+      const dataUrl = await toJpeg(node, {
+        quality: 0.95,
+        pixelRatio: 3,
+        cacheBust: true,
+        skipFonts: true,           // evita fallos CORS con fuentes externas que cortan la imagen
+        backgroundColor: dark ? "#141d31" : "#d5deea",
+        width: w, height: h,
+        canvasWidth: w * 3, canvasHeight: h * 3,   // dimensiones explícitas = imagen completa
+        style: { transform: "none", margin: "0" },
+      });
+      node.classList.remove("capturando");
       const res = await fetch(dataUrl);
       return await res.blob();
     } catch {
+      ticketRef.current?.classList.remove("capturando");
       toast("No se pudo capturar el ticket", "err");
       return null;
     }
@@ -296,8 +314,8 @@ export default function Facturas() {
     const blob = await capturar();
     setCapturando(false);
     if (!blob || !sel) return;
-    descargarBlob(blob, `ticket-${sel.pedido}-${todayISO()}.png`);
-    toast("Captura descargada como imagen", "ok");
+    descargarBlob(blob, `ticket-${sel.pedido}-${todayISO()}.jpg`);
+    toast("Captura JPG descargada completa", "ok");
   };
 
   /* Enviar la captura del ticket como imagen por WhatsApp */
@@ -309,8 +327,8 @@ export default function Facturas() {
     const blob = await capturar();
     setCapturando(false);
     if (!blob) return;
-    const nombre = `ticket-${est.pedido}-${todayISO()}.png`;
-    const file = new File([blob], nombre, { type: "image/png" });
+    const nombre = `ticket-${est.pedido}-${todayISO()}.jpg`;
+    const file = new File([blob], nombre, { type: "image/jpeg" });
     const nav = navigator as Navigator & { canShare?: (d: { files: File[] }) => boolean; share?: (d: any) => Promise<void> };
     const t = estudianteTotales(est);
 
@@ -351,7 +369,7 @@ export default function Facturas() {
           <div className="crumb">Operaciones</div>
           <h1>Facturación</h1>
           <p style={{ fontSize: 13.5, margin: "4px 0 0", color: "var(--ink-soft)" }}>
-            Ticket de pago estilo impresora térmica · captura como imagen y envío directo por WhatsApp
+            Ticket de pago estilo impresora térmica · descarga la captura <b>completa en JPG</b> o envíala directo por WhatsApp
           </p>
         </div>
         <div className="flex gap-2 flex-wrap">
@@ -361,7 +379,7 @@ export default function Facturas() {
             {capturando ? "Capturando…" : "Enviar captura por WhatsApp"}
           </button>
           <button className="btn btn-ghost" onClick={descargarImagen} disabled={!sel || capturando}>
-            <Download size={15} /> Descargar captura
+            <Download size={15} /> Descargar JPG
           </button>
           <button className="btn btn-ghost" onClick={imprimir} disabled={!sel}>
             <Printer size={15} /> Imprimir
