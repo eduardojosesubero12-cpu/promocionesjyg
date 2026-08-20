@@ -37,10 +37,35 @@ export interface Config {
   preciosPaquetes: number[];
   metodos: { id: string; nombre: string; bs: boolean; activo: boolean }[];
   usarApi: boolean; usarTasaManual: boolean; tasaFallback: number; tasaManualUSD: number; tasaManualEUR: number; historialAuto: boolean;
-  appsScriptUrl: string; autoSync: boolean;
+  supabaseUrl: string; supabaseKey: string; autoSyncCloud: boolean;
 }
 
 export interface OcrDraft { nombre: string; ci: string; fecha: string; raw: string; }
+
+/* Forma completa de la base del CRM (la usa el sincronizador de Supabase) */
+export interface CRMData {
+  escuelas: Escuela[]; docentes: Docente[]; estudiantes: Estudiante[];
+  cotizaciones: Cotizacion[]; sesiones: Sesion[]; eventos: Evento[];
+  mensajes: MensajeLog[]; usuarios: Usuario[]; historialTasas: HistorialTasa[];
+  config: Config; currentUserId: string; seqPedido: number; seqCot: number;
+}
+
+/* Mapa módulo → tabla de PostgreSQL en Supabase */
+export const DB_TABLES: { tabla: string; modulo: string }[] = [
+  { tabla: "escuelas", modulo: "Escuelas" },
+  { tabla: "docentes", modulo: "Profesores" },
+  { tabla: "estudiantes", modulo: "Estudiantes" },
+  { tabla: "pagos", modulo: "Pagos y abonos" },
+  { tabla: "adicionales_items", modulo: "Adicionales vendidos" },
+  { tabla: "cotizaciones", modulo: "Cotizaciones" },
+  { tabla: "cotizacion_items", modulo: "Ítems de cotización" },
+  { tabla: "sesiones", modulo: "Sesiones fotográficas" },
+  { tabla: "eventos", modulo: "Agenda" },
+  { tabla: "mensajes", modulo: "Mensajes" },
+  { tabla: "usuarios", modulo: "Usuarios" },
+  { tabla: "historial_tasas", modulo: "Historial de tasas" },
+  { tabla: "configuracion", modulo: "Configuración" },
+];
 
 /* =============== Constantes =============== */
 export const GRADOS = ["Preescolar", "Sexto Grado", "Bachiller", "Técnicos"];
@@ -299,37 +324,174 @@ export const SEED_CONFIG: Config = {
     { id: "m5", nombre: "Trueque", bs: true, activo: true },
   ],
   usarApi: true, usarTasaManual: false, tasaFallback: 348.5, tasaManualUSD: 348.5, tasaManualEUR: 384.2, historialAuto: true,
-  appsScriptUrl: "", autoSync: false,
+  supabaseUrl: "", supabaseKey: "", autoSyncCloud: false,
 };
 
-/* =============== Código de Apps Script (base de datos en Google Sheets) =============== */
-export const APPS_SCRIPT_CODE = `// Codigo.gs — pegarlo en Google Apps Script y desplegar como Aplicación web
-// Crea automáticamente la hoja "CRM_JyG" como base de datos
-function setup_() {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sh = ss.getSheetByName("CRM_JyG");
-  if (!sh) { sh = ss.insertSheet("CRM_JyG"); sh.appendRow(["fecha", "datos"]); }
-  return sh;
-}
-function doGet(e) {
-  var sh = setup_();
-  var accion = (e.parameter.action || "cargar");
-  if (accion === "ping") {
-    return json_({ ok: true, mensaje: "CRM JyG conectado", hora: new Date().toISOString() });
-  }
-  var last = sh.getLastRow(); // devuelve el último respaldo guardado
-  var datos = last > 1 ? sh.getRange(last, 2).getValue() : "";
-  return json_({ ok: true, datos: datos });
-}
-function doPost(e) {
-  var sh = setup_();
-  sh.appendRow([new Date(), e.postData.contents]); // guarda cada sincronización
-  return json_({ ok: true, mensaje: "Datos guardados", fila: sh.getLastRow() });
-}
-function json_(obj) {
-  return ContentService.createTextOutput(JSON.stringify(obj))
-    .setMimeType(ContentService.MimeType.JSON);
-}`;
+/* =============== Esquema SQL para Supabase (un tabla por módulo) =============== */
+export const SUPABASE_SQL = `-- ============================================================
+-- CRM Promociones JyG — Esquema de base de datos (Supabase / PostgreSQL)
+-- Un tabla por cada módulo. Pegar en: Supabase > SQL Editor > Run
+-- ============================================================
+
+create table if not exists escuelas (
+  id text primary key,
+  nombre text not null,
+  director text default '',
+  telefono text default '',
+  direccion text default '',
+  estado text default '',
+  municipio text default '',
+  anio_escolar text default '',
+  observaciones text default ''
+);
+
+create table if not exists docentes (
+  id text primary key,
+  nombre text not null,
+  telefono text default '',
+  escuela_id text references escuelas(id) on delete set null,
+  correo text default '',
+  observaciones text default ''
+);
+
+create table if not exists estudiantes (
+  id text primary key,
+  pedido text not null,
+  nombre text not null,
+  telefono text default '',
+  representante text default '',
+  ci text default '',
+  escuela_id text references escuelas(id) on delete set null,
+  docente_id text references docentes(id) on delete set null,
+  grado text default 'Bachiller',
+  seccion text default 'A',
+  paquete_id text default 'premium',
+  precio_paquete numeric(12,2) default 0,
+  estado_pedido text default 'Registrado',
+  fecha_registro text default '',
+  fecha_entrega text default '',
+  observaciones text default '',
+  codigos jsonb default '{}'::jsonb
+);
+
+create table if not exists pagos (
+  id text primary key,
+  estudiante_id text not null references estudiantes(id) on delete cascade,
+  fecha text not null,
+  monto numeric(12,2) not null default 0,
+  metodo text default '',
+  bs boolean default false,
+  tasa numeric(12,4) default 0,
+  usd numeric(12,2) default 0,
+  referencia text default '',
+  observacion text default ''
+);
+
+create table if not exists adicionales_items (
+  id text primary key,
+  estudiante_id text not null references estudiantes(id) on delete cascade,
+  producto text not null,
+  cantidad int default 1,
+  precio numeric(12,2) default 0,
+  talla text default ''
+);
+
+create table if not exists cotizaciones (
+  id text primary key,
+  numero text not null,
+  fecha text default '',
+  cliente text default '',
+  telefono text default '',
+  escuela text default '',
+  paquete_id text default 'premium',
+  estado text default 'Pendiente',
+  nota text default ''
+);
+
+create table if not exists cotizacion_items (
+  id text primary key,
+  cotizacion_id text not null references cotizaciones(id) on delete cascade,
+  producto text not null,
+  cantidad int default 1,
+  precio numeric(12,2) default 0,
+  talla text default ''
+);
+
+create table if not exists sesiones (
+  id text primary key,
+  escuela_id text references escuelas(id) on delete set null,
+  fecha text default '',
+  hora text default '',
+  fotografo text default '',
+  estado text default 'Agendada',
+  fotos int default 0,
+  nota text default ''
+);
+
+create table if not exists eventos (
+  id text primary key,
+  fecha text default '',
+  hora text default '',
+  titulo text default '',
+  tipo text default 'otro',
+  escuela_id text
+);
+
+create table if not exists mensajes (
+  id text primary key,
+  fecha text default '',
+  destinatario text default '',
+  telefono text default '',
+  plantilla text default '',
+  texto text default ''
+);
+
+create table if not exists usuarios (
+  id text primary key,
+  nombre text not null,
+  usuario text default '',
+  rol text default 'operador',
+  activo boolean default true
+);
+
+create table if not exists historial_tasas (
+  id text primary key,
+  fecha text not null,
+  usd numeric(12,4) default 0,
+  euro numeric(12,4) default 0,
+  paralelo numeric(12,4) default 0,
+  fuente text default 'dolarapi',
+  actualizado bigint default 0
+);
+
+create table if not exists configuracion (
+  id text primary key,
+  data jsonb default '{}'::jsonb,
+  seq_pedido int default 1,
+  seq_cot int default 1,
+  seq_cod int default 1,
+  current_user_id text default ''
+);
+
+-- Índices para consultas rápidas
+create index if not exists idx_estudiantes_escuela on estudiantes(escuela_id);
+create index if not exists idx_estudiantes_pedido on estudiantes(pedido);
+create index if not exists idx_pagos_estudiante on pagos(estudiante_id);
+create index if not exists idx_adicionales_estudiante on adicionales_items(estudiante_id);
+create index if not exists idx_cotizacion_items on cotizacion_items(cotizacion_id);
+
+-- Row Level Security: acceso abierto con la anon key.
+-- En producción se recomienda restringir con Supabase Auth.
+do $$
+declare t text;
+begin
+  foreach t in array array['escuelas','docentes','estudiantes','pagos','adicionales_items','cotizaciones','cotizacion_items','sesiones','eventos','mensajes','usuarios','historial_tasas','configuracion']
+  loop
+    execute format('alter table %I enable row level security', t);
+    execute format('drop policy if exists "jyg_abierto" on %I', t);
+    execute format('create policy "jyg_abierto" on %I for all using (true) with check (true)', t);
+  end loop;
+end $$;`;
 
 /* Historial diario de tasas (últimos 15 días) */
 export const SEED_HISTORIAL: HistorialTasa[] = (() => {

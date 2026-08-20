@@ -1,13 +1,13 @@
 import React, { useMemo, useRef, useState } from "react";
 import {
-  Check, Clock, Cloud, Copy, Database, Download, DownloadCloud, Euro, Eye, EyeOff,
+  AlertTriangle, Check, Clock, Cloud, Copy, Database, Download, DownloadCloud, Euro, Eye, EyeOff,
   Globe, History, KeyRound, Pencil, Plug, Plus, RefreshCw, ScanLine, ShieldCheck, Smartphone,
   Terminal, Trash2, Upload, UploadCloud, UserCog,
 } from "lucide-react";
 import { useApp } from "../lib/store";
 import type { Rol, Usuario } from "../lib/data";
 import {
-  API_DOLARES, APPS_SCRIPT_CODE, API_EUROS, OCR_CRED, downloadFile, fmtBs, fmtFecha, fmtFechaHoraViva,
+  API_DOLARES, SUPABASE_SQL, API_EUROS, DB_TABLES, OCR_CRED, downloadFile, fmtBs, fmtFecha, fmtFechaHoraViva,
   fmtHaceSegundos, fmtHoraAgo, toCSV, todayISO, uid,
 } from "../lib/data";
 import { Badge, Field, Modal, SectionHead, useNow } from "../components/ui";
@@ -326,40 +326,66 @@ function ImportBtn() {
 export function Integraciones() {
   const { db, tasa, refreshTasa, tasaLoading, aplicarTasaManual, deleteTasaHistorial, clearTasaHistorial, confirm, success, toast, setConfig, setOcrOpen, syncInfo, syncing, testCloud, syncToCloud, restoreFromCloud } = useApp();
   const nowInt = useNow(1000);
-  const [urlAS, setUrlAS] = useState(db.config.appsScriptUrl);
+  const [sbUrl, setSbUrl] = useState(db.config.supabaseUrl);
+  const [sbKey, setSbKey] = useState(db.config.supabaseKey);
+  const [verKey, setVerKey] = useState(false);
   const [pingState, setPingState] = useState<"idle" | "ok" | "fail" | "busy">("idle");
+  const [pingInfo, setPingInfo] = useState<{ tablas: number; filas: number } | null>(null);
   const [verCodigo, setVerCodigo] = useState(false);
+  const [prog, setProg] = useState<Record<string, "idle" | "busy" | "ok" | "err">>({});
 
-  const guardarUrl = async () => {
-    const u = urlAS.trim();
-    if (u && !/^https:\/\/script\.google\.com\/macros\/s\//.test(u)) {
-      toast("La URL debe ser de una Aplicación web de Apps Script (…/macros/s/…/exec)", "err");
+  /* Cantidad de filas locales por tabla (para el mapa) */
+  const filasLocales = useMemo(() => {
+    const d = db as any;
+    return {
+      escuelas: d.escuelas.length, docentes: d.docentes.length, estudiantes: d.estudiantes.length,
+      pagos: d.estudiantes.reduce((s: number, e: any) => s + e.pagos.length, 0),
+      adicionales_items: d.estudiantes.reduce((s: number, e: any) => s + e.adicionales.length, 0),
+      cotizaciones: d.cotizaciones.length,
+      cotizacion_items: d.cotizaciones.reduce((s: number, c: any) => s + c.adicionales.length, 0),
+      sesiones: d.sesiones.length, eventos: d.eventos.length, mensajes: d.mensajes.length,
+      usuarios: d.usuarios.length, historial_tasas: d.historialTasas.length, configuracion: 1,
+    } as Record<string, number>;
+  }, [db]);
+
+  const guardarCredenciales = async () => {
+    const u = sbUrl.trim(); const k = sbKey.trim();
+    if (u && !/^https:\/\/[a-z0-9-]+\.supabase\.co$/.test(u)) {
+      toast("La URL debe ser la de tu proyecto: https://xxxx.supabase.co", "err");
       return;
     }
-    const ok = await confirm({ title: "¿Desea guardar este registro?", message: u ? "Se usará esta URL como base de datos en la nube." : "Se desactivará la sincronización con la nube.", confirmText: "Sí, Guardar" });
+    const ok = await confirm({ title: "¿Desea guardar este registro?", message: u ? "Se usarán estas credenciales para conectar con Supabase." : "Se desactivará la conexión con la base de datos.", confirmText: "Sí, Guardar" });
     if (!ok) return;
-    setConfig({ appsScriptUrl: u, autoSync: u ? db.config.autoSync : false });
+    setConfig({ supabaseUrl: u, supabaseKey: k, autoSyncCloud: u && k ? db.config.autoSyncCloud : false });
     setPingState("idle");
     success();
   };
 
   const probar = async () => {
-    const u = urlAS.trim();
-    if (!u) { toast("Pega primero la URL de la Aplicación web", "warn"); return; }
+    const u = sbUrl.trim(); const k = sbKey.trim();
+    if (!u || !k) { toast("Pega la URL del proyecto y la anon key", "warn"); return; }
     setPingState("busy");
-    const ok = await testCloud(u);
-    setPingState(ok ? "ok" : "fail");
-    toast(ok ? "Conexión exitosa con Google Sheets" : "No se pudo conectar — revisa el despliegue", ok ? "ok" : "err");
+    try {
+      const info = await testCloud(u, k);
+      setPingInfo(info);
+      setPingState("ok");
+      toast(`Conectado: ${info.tablas} tablas · ${info.filas} filas en Supabase`, "ok");
+    } catch (e: any) {
+      setPingState("fail");
+      toast(e.message || "No se pudo conectar", "err");
+    }
   };
 
   const subir = async () => {
-    const ok = await syncToCloud(urlAS.trim() || undefined);
-    if (ok && urlAS.trim() !== db.config.appsScriptUrl) setConfig({ appsScriptUrl: urlAS.trim() });
-    if (ok) success("Datos respaldados en Google Sheets");
+    const okc = await confirm({ title: "¿Subir toda la base de datos?", message: "Las 13 tablas de Supabase se reemplazarán con los datos actuales del CRM.", confirmText: "Sí, Subir" });
+    if (!okc) return;
+    setProg(Object.fromEntries(DB_TABLES.map((t) => [t.tabla, "idle"])));
+    const ok = await syncToCloud((tabla, estado) => setProg((p) => ({ ...p, [tabla]: estado })));
+    if (ok) success("Base de datos subida a Supabase");
   };
 
   const bajar = async () => {
-    const ok = await confirm({ title: "¿Restaurar desde la nube?", message: "Los datos actuales de este navegador se reemplazarán por el último respaldo de Google Sheets.", confirmText: "Sí, Restaurar" });
+    const ok = await confirm({ title: "¿Restaurar desde Supabase?", message: "Los datos actuales de este navegador se reemplazarán por los de la base de datos.", confirmText: "Sí, Restaurar" });
     if (!ok) return;
     const r = await restoreFromCloud();
     if (r) success("Base de datos restaurada");
@@ -423,7 +449,7 @@ export function Integraciones() {
           <div className="crumb">Administración</div>
           <h1>Integraciones</h1>
           <p style={{ fontSize: 13.5, margin: "4px 0 0", color: "var(--ink-soft)" }}>
-            Tasa del día vía ve.dolarapi.com con <b>historial diario</b> · OCR con la IA de Google · WhatsApp
+            Base de datos en <b>Supabase</b> · tasa del día vía ve.dolarapi.com · OCR con la IA de Google · WhatsApp
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
@@ -492,23 +518,27 @@ export function Integraciones() {
         </div>
       </div>
 
-      {/* ============ BASE DE DATOS EN LA NUBE ============ */}
+      {/* ============ BASE DE DATOS — SUPABASE ============ */}
       <div className="card mb-6 overflow-hidden reveal">
-        <div className="px-5 py-4 flex items-center gap-3 flex-wrap" style={{ background: "linear-gradient(135deg, var(--blue), #0a2a4d)", color: "#fff" }}>
-          <span className="w-11 h-11 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: "rgba(255,217,112,0.18)", color: "#ffd970" }}><Cloud size={22} /></span>
-          <div className="flex-1 min-w-[220px]">
-            <h3 className="font-display font-bold text-[17px] m-0">Base de datos en la nube</h3>
-            <p className="text-[12px] m-0" style={{ color: "rgba(255,255,255,0.72)" }}>Recomendación para JyG: <b>Google Sheets + Apps Script</b> — gratis, sin servidores y ya vives en el ecosistema Google (OCR, Codigo.gs)</p>
+        <div className="px-5 py-4 flex items-center gap-3 flex-wrap" style={{ background: "linear-gradient(135deg, #1c2b24, #123524 55%, #0e4028)", color: "#fff" }}>
+          <span className="w-11 h-11 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: "rgba(62,207,142,0.16)" }}>
+            <svg width="24" height="24" viewBox="0 0 109 113" fill="none" aria-hidden="true">
+              <path d="M63.7 0 7.6 62.9c-2 2.2-.4 5.8 2.6 5.8h31l-5.7 42.9c-.4 3.2 3.6 5 5.7 2.6l56.5-63.5c2-2.2.4-5.8-2.6-5.8h-31L69.7 1.6c.4-3.1-3.6-4.9-6-1.6z" fill="#3ECF8E" />
+            </svg>
+          </span>
+          <div className="flex-1 min-w-[230px]">
+            <h3 className="font-display font-bold text-[17px] m-0">Base de datos · Supabase <span className="text-[12px] font-semibold" style={{ color: "#3ECF8E" }}>(PostgreSQL)</span></h3>
+            <p className="text-[12px] m-0" style={{ color: "rgba(255,255,255,0.72)" }}>Cada módulo del CRM vive en su propia tabla · sincronización completa en la nube</p>
           </div>
-          <span className="badge" style={{ background: "var(--gold)", color: "#3b2c00" }}>★ RECOMENDADA</span>
+          <span className="badge" style={{ background: "#3ECF8E", color: "#0b3d24" }}>⚡ BASE ACTIVA</span>
         </div>
 
         {/* Flujo de arquitectura */}
         <div className="px-5 pt-5 pb-2 flex items-center justify-center gap-2 flex-wrap">
           {[
             { t: "CRM JyG", s: "caché local en tu navegador", c: "var(--blue)" },
-            { t: "Apps Script", s: "Aplicación web (gratis)", c: "var(--gold-deep)" },
-            { t: "Google Sheets", s: "hoja CRM_JyG · respaldos fechados", c: "var(--green)" },
+            { t: "Supabase", s: "PostgreSQL en la nube · REST API", c: "#3ECF8E" },
+            { t: "13 tablas", s: "una por cada módulo del CRM", c: "var(--gold-deep)" },
           ].map((n, i) => (
             <React.Fragment key={n.t}>
               {i > 0 && (
@@ -529,55 +559,66 @@ export function Integraciones() {
           <div>
             <div className="flex items-center justify-between mb-2.5">
               <span className="font-display font-semibold text-[13px] uppercase tracking-wider" style={{ color: "var(--ink-faint)" }}>Conexión</span>
-              <span className="flex items-center gap-1.5 text-[11.5px] font-semibold" style={{ color: db.config.appsScriptUrl ? "var(--green)" : "var(--ink-faint)" }}>
-                <span className={`w-2 h-2 rounded-full ${db.config.appsScriptUrl ? "pulse-dot" : ""}`} style={{ background: db.config.appsScriptUrl ? "var(--green)" : "var(--border)" }} />
-                {db.config.appsScriptUrl ? "Configurada" : "Sin configurar"}
+              <span className="flex items-center gap-1.5 text-[11.5px] font-semibold" style={{ color: db.config.supabaseUrl && db.config.supabaseKey ? "#16a36a" : "var(--ink-faint)" }}>
+                <span className={`w-2 h-2 rounded-full ${db.config.supabaseUrl && db.config.supabaseKey ? "pulse-dot" : ""}`} style={{ background: db.config.supabaseUrl && db.config.supabaseKey ? "#3ECF8E" : "var(--border)" }} />
+                {db.config.supabaseUrl && db.config.supabaseKey ? "Conectada" : "Sin configurar"}
               </span>
             </div>
-            <Field label="URL de la Aplicación web (Apps Script)" hint="…/macros/s/XXXX/exec — termina en /exec">
-              <input className="input" style={{ fontFamily: "ui-monospace, monospace", fontSize: 12 }} placeholder="https://script.google.com/macros/s/…/exec" value={urlAS} onChange={(e) => setUrlAS(e.target.value)} />
+            <Field label="URL del proyecto" hint="https://xxxx.supabase.co — la encuentras en Settings → API">
+              <input className="input" style={{ fontFamily: "ui-monospace, monospace", fontSize: 12 }} placeholder="https://abcdefgh.supabase.co" value={sbUrl} onChange={(e) => setSbUrl(e.target.value)} />
+            </Field>
+            <Field label="Anon key (pública)" hint="La clave anon de Settings → API (no es la service_role)">
+              <div className="flex gap-2">
+                <input className="input" style={{ fontFamily: "ui-monospace, monospace", fontSize: 12 }} type={verKey ? "text" : "password"} placeholder="eyJhbGciOiJIUzI1NiIs…" value={sbKey} onChange={(e) => setSbKey(e.target.value)} />
+                <button className="icon-btn" style={{ flexShrink: 0 }} onClick={() => setVerKey((v) => !v)} title={verKey ? "Ocultar" : "Mostrar"}>{verKey ? <EyeOff size={15} /> : <Eye size={15} />}</button>
+              </div>
             </Field>
             <div className="flex gap-2 flex-wrap mt-3">
-              <button className="btn btn-primary btn-sm" onClick={guardarUrl}><Check size={14} /> Guardar URL</button>
+              <button className="btn btn-primary btn-sm" onClick={guardarCredenciales}><Check size={14} /> Guardar credenciales</button>
               <button className="btn btn-ghost btn-sm" onClick={probar} disabled={pingState === "busy"}>
                 <Plug size={14} className={pingState === "busy" ? "spin" : ""} />
-                {pingState === "busy" ? "Probando…" : pingState === "ok" ? "Conectada ✓" : pingState === "fail" ? "Reintentar" : "Probar conexión"}
+                {pingState === "busy" ? "Probando…" : pingState === "ok" ? "Conectado ✓" : pingState === "fail" ? "Reintentar" : "Probar conexión"}
               </button>
             </div>
+            {pingState === "ok" && pingInfo && (
+              <p className="text-[12px] mt-2 mb-0 flex items-center gap-1.5" style={{ color: "#16a36a" }}>
+                <Database size={13} /> {pingInfo.tablas} tablas accesibles · {pingInfo.filas} filas totales en la nube
+              </p>
+            )}
 
             <div className="mt-4 pt-4 border-t" style={{ borderColor: "var(--border-soft)" }}>
               <div className="flex gap-2 flex-wrap">
-                <button className="btn btn-soft btn-sm" onClick={subir} disabled={syncing}><UploadCloud size={14} /> {syncing ? "Subiendo…" : "Subir datos a la nube"}</button>
-                <button className="btn btn-ghost btn-sm" onClick={bajar} disabled={syncing || !db.config.appsScriptUrl}><DownloadCloud size={14} /> Restaurar desde la nube</button>
+                <button className="btn btn-soft btn-sm" onClick={subir} disabled={syncing || !db.config.supabaseUrl}><UploadCloud size={14} /> {syncing ? "Subiendo…" : "Subir base completa"}</button>
+                <button className="btn btn-ghost btn-sm" onClick={bajar} disabled={syncing || !db.config.supabaseUrl}><DownloadCloud size={14} /> Restaurar desde Supabase</button>
               </div>
               <label className="flex items-center gap-2.5 text-[12.5px] font-semibold cursor-pointer mt-3" style={{ color: "var(--ink-soft)" }}>
-                <input type="checkbox" disabled={!db.config.appsScriptUrl} checked={db.config.autoSync} onChange={(e) => { setConfig({ autoSync: e.target.checked }); toast(e.target.checked ? "Auto-sincronización activada (cada cambio)" : "Auto-sincronización apagada", "ok"); }} />
+                <input type="checkbox" disabled={!db.config.supabaseUrl || !db.config.supabaseKey} checked={db.config.autoSyncCloud} onChange={(e) => { setConfig({ autoSyncCloud: e.target.checked }); toast(e.target.checked ? "Auto-sincronización activada (cada cambio)" : "Auto-sincronización apagada", "ok"); }} />
                 Sincronizar automáticamente tras cada cambio (2.5 s)
               </label>
               <div className="mt-3 p-3 rounded-xl text-[12px] flex items-start gap-2" style={{ background: syncInfo ? (syncInfo.ok ? "var(--green-tint)" : "var(--red-tint)") : "var(--surface-2)", color: syncInfo ? (syncInfo.ok ? "var(--green)" : "var(--red)") : "var(--ink-faint)" }}>
                 <Cloud size={14} className="mt-0.5 flex-shrink-0" />
                 <span>
-                  {syncInfo ? <><b>{syncInfo.msg}</b><br /><span className="tabular-nums" style={{ opacity: 0.75 }}>{fmtFechaHoraViva(syncInfo.last, nowInt)} · {fmtHaceSegundos(syncInfo.last, nowInt)}</span></> : "Aún no hay sincronizaciones. El CRM sigue guardando todo en este navegador; la nube es tu respaldo en línea."}
+                  {syncInfo ? <><b>{syncInfo.msg}</b><br /><span className="tabular-nums" style={{ opacity: 0.75 }}>{fmtFechaHoraViva(syncInfo.last, nowInt)} · {fmtHaceSegundos(syncInfo.last, nowInt)}</span></> : "Aún no hay sincronizaciones. El CRM sigue guardando todo en este navegador; Supabase es tu base de datos en línea."}
                 </span>
               </div>
             </div>
           </div>
 
-          {/* Activación en 4 pasos + código */}
+          {/* Activación + esquema SQL + mapa de tablas */}
           <div>
             <div className="flex items-center justify-between mb-2.5">
               <span className="font-display font-semibold text-[13px] uppercase tracking-wider" style={{ color: "var(--ink-faint)" }}>Activar en 4 pasos</span>
-              <button className="btn btn-gold btn-xs" onClick={() => setVerCodigo((v) => !v)}><Terminal size={12} /> {verCodigo ? "Ocultar código" : "Ver Codigo.gs"}</button>
+              <button className="btn btn-gold btn-xs" onClick={() => setVerCodigo((v) => !v)}><Terminal size={12} /> {verCodigo ? "Ocultar esquema" : "Ver esquema SQL"}</button>
             </div>
             <ol className="m-0 pl-0 flex flex-col gap-2" style={{ listStyle: "none", counterReset: "paso" }}>
               {[
-                "Crea una Hoja de cálculo de Google nueva (será tu base de datos).",
-                "Menú Extensiones → Apps Script y borra el contenido del archivo Codigo.gs.",
-                "Pega el código que está abajo (crea solo la hoja CRM_JyG al primer uso).",
-                "Implementar → Nueva implementación → Aplicación web · acceso: “Cualquier persona” → copia la URL /exec y pégala aquí.",
+                "Crea un proyecto gratis en supabase.com (con tu cuenta de Google).",
+                "Ve a SQL Editor → New query → pega el esquema que está abajo → Run.",
+                "En Settings → API copia la “URL” del proyecto y la “anon public key”.",
+                "Pégalas aquí, guarda y presiona “Probar conexión”. ¡Listo!",
               ].map((p, i) => (
                 <li key={i} className="flex gap-3 text-[12.5px]" style={{ color: "var(--ink-soft)" }}>
-                  <span className="w-6 h-6 rounded-full flex items-center justify-center font-display font-bold text-[11px] flex-shrink-0" style={{ background: "var(--blue-tint-2)", color: "var(--blue)" }}>{i + 1}</span>
+                  <span className="w-6 h-6 rounded-full flex items-center justify-center font-display font-bold text-[11px] flex-shrink-0" style={{ background: "rgba(62,207,142,0.15)", color: "#16a36a" }}>{i + 1}</span>
                   <span className="pt-0.5">{p}</span>
                 </li>
               ))}
@@ -586,25 +627,40 @@ export function Integraciones() {
             {verCodigo && (
               <div className="relative mt-3 rounded-xl overflow-hidden" style={{ background: "#0b1626", border: "1px solid #1d3350" }}>
                 <div className="flex items-center justify-between px-3.5 py-2" style={{ background: "#0e1d33" }}>
-                  <span className="flex items-center gap-2 text-[11px] font-display font-semibold" style={{ color: "#7fa3cf" }}><Terminal size={13} /> Codigo.gs · Google Apps Script</span>
-                  <button className="btn btn-xs" style={{ background: "rgba(255,217,112,0.15)", color: "#ffd970", border: "1px solid rgba(255,217,112,0.4)" }}
-                    onClick={() => { navigator.clipboard?.writeText(APPS_SCRIPT_CODE).then(() => toast("Codigo.gs copiado al portapapeles", "ok")).catch(() => toast("No se pudo copiar", "err")); }}>
+                  <span className="flex items-center gap-2 text-[11px] font-display font-semibold" style={{ color: "#7fa3cf" }}><Terminal size={13} /> esquema_jyg.sql · Supabase</span>
+                  <button className="btn btn-xs" style={{ background: "rgba(62,207,142,0.15)", color: "#3ECF8E", border: "1px solid rgba(62,207,142,0.4)" }}
+                    onClick={() => { navigator.clipboard?.writeText(SUPABASE_SQL).then(() => toast("Esquema SQL copiado al portapapeles", "ok")).catch(() => toast("No se pudo copiar", "err")); }}>
                     <Copy size={12} /> Copiar
                   </button>
                 </div>
-                <pre className="m-0 p-4 overflow-x-auto text-[11px] leading-relaxed" style={{ color: "#a8c6e8", fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace", maxHeight: 240 }}>
-                  {APPS_SCRIPT_CODE}
+                <pre className="m-0 p-4 overflow-x-auto text-[11px] leading-relaxed" style={{ color: "#a8c6e8", fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace", maxHeight: 260 }}>
+                  {SUPABASE_SQL}
                 </pre>
               </div>
             )}
 
-            {/* Escalabilidad */}
+            {/* Mapa de tablas */}
             <div className="mt-4 p-3.5 rounded-xl" style={{ background: "var(--surface-2)" }}>
-              <div className="font-display font-semibold text-[12px] uppercase tracking-wider mb-2" style={{ color: "var(--ink-faint)" }}>¿Y cuando JyG crezca?</div>
-              <div className="flex flex-col gap-1.5 text-[12.5px]" style={{ color: "var(--ink-soft)" }}>
-                <span><b style={{ color: "var(--gold-deep)" }}>Ahora · Google Sheets</b> — gratis, respaldo con fecha, ideal hasta ~2.000 estudiantes.</span>
-                <span><b style={{ color: "var(--blue)" }}>Luego · Firebase</b> — si quieres sincronización en tiempo real entre varios teléfonos y laptops.</span>
-                <span><b style={{ color: "var(--green)" }}>Después · Supabase (PostgreSQL)</b> — multi-sucursal, reportes SQL y app propia. El CRM exporta/importa JSON, así que migrar es directo.</span>
+              <div className="flex items-center justify-between mb-2">
+                <span className="font-display font-semibold text-[12px] uppercase tracking-wider" style={{ color: "var(--ink-faint)" }}>Mapa de tablas (13)</span>
+                <span className="text-[11px]" style={{ color: "var(--ink-faint)" }}>filas locales → Supabase</span>
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
+                {DB_TABLES.map((t) => {
+                  const estado = prog[t.tabla];
+                  const borderColor = estado === "ok" ? "#3ECF8E" : estado === "err" ? "var(--red)" : estado === "busy" ? "var(--gold)" : "var(--border)";
+                  return (
+                    <span key={t.tabla} className="px-2 py-1.5 rounded-lg flex items-center justify-between gap-1.5 transition-all" style={{ background: "var(--surface)", border: `1.2px solid ${borderColor}` }}>
+                      <span className="text-[11px] truncate" style={{ color: "var(--ink-soft)" }} title={t.modulo}>{t.tabla}</span>
+                      <span className="flex items-center gap-1 flex-shrink-0">
+                        {estado === "busy" && <span className="spin inline-flex" style={{ color: "var(--gold)" }}><RefreshCw size={11} /></span>}
+                        {estado === "ok" && <span style={{ color: "#16a36a" }}><Check size={12} /></span>}
+                        {estado === "err" && <span style={{ color: "var(--red)" }}><AlertTriangle size={12} /></span>}
+                        <span className="font-display font-bold text-[11px] tabular-nums" style={{ color: "var(--blue)" }}>{filasLocales[t.tabla] ?? 0}</span>
+                      </span>
+                    </span>
+                  );
+                })}
               </div>
             </div>
           </div>
