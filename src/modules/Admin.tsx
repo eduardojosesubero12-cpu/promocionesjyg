@@ -1,14 +1,14 @@
 import React, { useMemo, useRef, useState } from "react";
 import {
   AlertTriangle, Check, Clock, Cloud, Copy, Database, Download, DownloadCloud, Euro, Eye, EyeOff,
-  Globe, History, KeyRound, Pencil, Plug, Plus, RefreshCw, ScanLine, ShieldCheck, Smartphone,
-  Terminal, Trash2, Upload, UploadCloud, UserCog,
+  Globe, History, KeyRound, Package, Pencil, Plug, Plus, RefreshCw, ScanLine, School, ShieldCheck,
+  Smartphone, Terminal, Trash2, Upload, UploadCloud, UserCog,
 } from "lucide-react";
 import { useApp } from "../lib/store";
-import type { Rol, Usuario } from "../lib/data";
+import type { PaqueteEscuela, Rol, Usuario } from "../lib/data";
 import {
-  API_DOLARES, SUPABASE_SQL, API_EUROS, DB_TABLES, OCR_CRED, downloadFile, fmtBs, fmtFecha, fmtFechaHoraViva,
-  fmtHaceSegundos, fmtHoraAgo, toCSV, todayISO, uid,
+  API_DOLARES, SUPABASE_SQL, API_EUROS, DB_TABLES, OCR_CRED, PAQUETES, downloadFile, fmtBs, fmtFecha,
+  fmtFechaHoraViva, fmtHaceSegundos, fmtHoraAgo, toCSV, todayISO, uid,
 } from "../lib/data";
 import { Badge, Field, Modal, SectionHead, useNow } from "../components/ui";
 
@@ -135,13 +135,66 @@ export function Usuarios() {
 /* ================= CONFIGURACIÓN ================= */
 
 export function Configuracion() {
-  const { db, setConfig, confirm, success, toast, tasa, refreshTasa, setRoute, aplicarTasaManual, setOcrOpen } = useApp();
+  const { db, setConfig, confirm, success, toast, tasa, refreshTasa, setRoute, aplicarTasaManual, setOcrOpen, savePaqueteEscuela, deletePaqueteEscuela } = useApp();
   const nowCfg = useNow(1000);
   const [emp, setEmp] = useState({ ...db.config.empresa });
   const [fallback, setFallback] = useState(String(db.config.tasaManualUSD || db.config.tasaFallback));
   const [nuevoMetodo, setNuevoMetodo] = useState("");
   const [nuevoEsBs, setNuevoEsBs] = useState(false);
   const [verClaveOcr, setVerClaveOcr] = useState(false);
+  const [editPaq, setEditPaq] = useState<PaqueteEscuela | null>(null);
+
+  /* ---- Paquetes por escuela ---- */
+  const TIPOS_PAQUETE = [
+    ...Object.values(PAQUETES).map((p) => ({ id: p.id, nombre: p.nombre, color: p.color })),
+    { id: "personalizado", nombre: "Personalizado", color: "var(--slate)" },
+  ];
+
+  const nuevoPaquete = (escuelaId = ""): PaqueteEscuela => ({
+    id: "", escuelaId, nombre: "", tipoPaqueteId: "premium", precio: 40,
+    articulos: [], nota: "", activo: true, creado: todayISO(),
+  });
+
+  const guardarPaquete = async () => {
+    if (!editPaq) return;
+    if (!editPaq.nombre.trim()) { toast("Escribe el nombre del paquete", "err"); return; }
+    if (!editPaq.escuelaId) { toast("Selecciona la escuela", "err"); return; }
+    const ok = await confirm({ title: "¿Desea guardar este registro?", message: "Verifique la información antes de continuar.", confirmText: "Sí, Guardar" });
+    if (!ok) return;
+    savePaqueteEscuela({ ...editPaq, id: editPaq.id || uid() });
+    success("Paquete asignado correctamente");
+    setEditPaq(null);
+  };
+
+  const eliminarPaquete = async (p: PaqueteEscuela) => {
+    const ok = await confirm({ title: "¿Está seguro de eliminar este registro?", message: `Se eliminará el paquete "${p.nombre}".`, confirmText: "Eliminar", danger: true });
+    if (!ok) return;
+    deletePaqueteEscuela(p.id);
+    toast("Paquete eliminado", "warn");
+  };
+
+  const cambiarArticulos = (i: number, campo: "nombre" | "cantidad", valor: string) => {
+    if (!editPaq) return;
+    const arts = [...editPaq.articulos];
+    arts[i] = { ...arts[i], [campo]: campo === "cantidad" ? Number(valor) || 1 : valor };
+    setEditPaq({ ...editPaq, articulos: arts });
+  };
+
+  const desdeTipo = (tipoId: string) => {
+    const p = PAQUETES[tipoId];
+    if (!p || !editPaq) return;
+    setEditPaq({
+      ...editPaq,
+      articulos: p.incluye.map((nombre) => ({ nombre, cantidad: 1 })),
+      precio: editPaq.precio || p.precioBase,
+    });
+  };
+
+  /* Agrupar paquetes por escuela */
+  const paquetesPorEscuela = db.escuelas.map((e) => ({
+    escuela: e,
+    paquetes: db.paquetesEscuelas.filter((p) => p.escuelaId === e.id),
+  })).filter((g) => g.paquetes.length > 0 || db.escuelas.length > 0);
 
   const copiar = (texto: string, que: string) => {
     navigator.clipboard?.writeText(texto).then(() => toast(`${que} copiado al portapapeles`, "ok")).catch(() => toast("No se pudo copiar", "err"));
@@ -297,6 +350,117 @@ export function Configuracion() {
           </p>
         </div>
       </div>
+
+      {/* ============ PAQUETES POR ESCUELA ============ */}
+      <div className="card mt-6 overflow-hidden reveal">
+        <div className="px-5 py-4 flex items-center gap-3 flex-wrap" style={{ background: "linear-gradient(135deg, var(--gold-deep), #8a6200)", color: "#fff" }}>
+          <span className="w-11 h-11 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: "rgba(255,255,255,0.16)", color: "#fff" }}><Package size={22} /></span>
+          <div className="flex-1 min-w-[220px]">
+            <h3 className="font-display font-bold text-[17px] m-0">Paquetes por Escuela</h3>
+            <p className="text-[12px] m-0" style={{ color: "rgba(255,255,255,0.78)" }}>Asigna paquetes negociados con nombre propio, tipo y artículos editables a cada escuela</p>
+          </div>
+          <button className="btn" style={{ background: "#fff", color: "var(--gold-deep)" }} onClick={() => setEditPaq(nuevoPaquete())}><Plus size={15} /> Asignar paquete</button>
+        </div>
+
+        <div className="p-5 flex flex-col gap-5">
+          {paquetesPorEscuela.map(({ escuela, paquetes }) => (
+            <div key={escuela.id} className="rounded-xl border overflow-hidden" style={{ borderColor: "var(--border-soft)" }}>
+              <div className="flex items-center gap-2.5 px-4 py-2.5" style={{ background: "var(--surface-2)" }}>
+                <School size={16} style={{ color: "var(--blue)" }} />
+                <span className="font-display font-semibold text-[13.5px] flex-1">{escuela.nombre}</span>
+                <Badge tone={paquetes.length ? "gold" : "slate"}>{paquetes.length} {paquetes.length === 1 ? "paquete" : "paquetes"}</Badge>
+                <button className="btn btn-xs btn-soft" onClick={() => setEditPaq(nuevoPaquete(escuela.id))}><Plus size={12} /> Agregar</button>
+              </div>
+
+              {paquetes.length === 0 ? (
+                <p className="px-4 py-3 text-[12.5px] m-0" style={{ color: "var(--ink-faint)" }}>Aún no hay paquetes asignados a esta escuela.</p>
+              ) : (
+                <div className="flex flex-col">
+                  {paquetes.map((p, idx) => {
+                    const tipo = TIPOS_PAQUETE.find((t) => t.id === p.tipoPaqueteId) || TIPOS_PAQUETE[TIPOS_PAQUETE.length - 1];
+                    return (
+                      <div key={p.id} className="flex items-center gap-3 px-4 py-3 flex-wrap transition-colors hover:bg-[var(--surface-2)]" style={{ borderTop: idx > 0 ? "1px solid var(--border-soft)" : "none" }}>
+                        <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: tipo.color, opacity: p.activo ? 1 : 0.3 }} />
+                        <div className="flex-1 min-w-[200px]">
+                          <div className="font-display font-semibold text-[14px]" style={{ color: p.activo ? "var(--ink)" : "var(--ink-faint)" }}>{p.nombre}</div>
+                          <div className="text-[11.5px] mt-0.5" style={{ color: "var(--ink-faint)" }}>
+                            {p.articulos.length} artículos · {p.nota ? `“${p.nota}”` : "sin nota"}
+                          </div>
+                        </div>
+                        <Badge tone="blue">{tipo.nombre}</Badge>
+                        <span className="font-display font-bold text-[15px]" style={{ color: "var(--green)" }}>${p.precio}</span>
+                        <button className="btn btn-xs" style={{ background: p.activo ? "var(--green-tint)" : "var(--red-tint)", color: p.activo ? "var(--green)" : "var(--red)" }}
+                          onClick={() => savePaqueteEscuela({ ...p, activo: !p.activo })}>
+                          {p.activo ? "Activo" : "Inactivo"}
+                        </button>
+                        <div className="flex gap-1">
+                          <button className="icon-btn" title="Editar" onClick={() => setEditPaq({ ...p, articulos: [...p.articulos] })}><Pencil size={14} /></button>
+                          <button className="icon-btn danger" title="Eliminar" onClick={() => eliminarPaquete(p)}><Trash2 size={14} /></button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          ))}
+
+          {db.escuelas.length === 0 && (
+            <p className="text-center text-[13px] py-4 m-0" style={{ color: "var(--ink-faint)" }}>Registra escuelas para poder asignarles paquetes.</p>
+          )}
+        </div>
+      </div>
+
+      {/* Modal editor de paquete */}
+      {editPaq && (
+        <Modal open onClose={() => setEditPaq(null)} size="lg" title={editPaq.id ? "Editar paquete" : "Asignar paquete a escuela"}
+          footer={<>
+            <button className="btn btn-ghost" onClick={() => setEditPaq(null)}>Cancelar</button>
+            <button className="btn btn-primary" onClick={guardarPaquete}><Check size={15} /> Sí, Guardar</button>
+          </>}>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <Field label="Nombre del paquete" required>
+              <input className="input" placeholder="Ej: Paquete VIP San Agustín" value={editPaq.nombre} onChange={(e) => setEditPaq({ ...editPaq, nombre: e.target.value })} />
+            </Field>
+            <Field label="Escuela" required>
+              <select className="select" value={editPaq.escuelaId} onChange={(e) => setEditPaq({ ...editPaq, escuelaId: e.target.value })}>
+                <option value="">— Seleccione —</option>
+                {db.escuelas.map((e) => <option key={e.id} value={e.id}>{e.nombre}</option>)}
+              </select>
+            </Field>
+            <Field label="Tipo de paquete" hint="Al elegir un tipo se cargan sus artículos base">
+              <select className="select" value={editPaq.tipoPaqueteId} onChange={(e) => { setEditPaq({ ...editPaq, tipoPaqueteId: e.target.value }); desdeTipo(e.target.value); }}>
+                {TIPOS_PAQUETE.map((t) => <option key={t.id} value={t.id}>{t.nombre}</option>)}
+              </select>
+            </Field>
+            <Field label="Precio negociado (USD)">
+              <input type="number" min={0} step="0.5" className="input" value={editPaq.precio} onChange={(e) => setEditPaq({ ...editPaq, precio: Number(e.target.value) || 0 })} />
+            </Field>
+          </div>
+
+          <div className="mt-4">
+            <div className="flex items-center justify-between mb-2">
+              <span className="font-display font-semibold text-[13px]">Artículos incluidos ({editPaq.articulos.length})</span>
+              <button className="btn btn-xs btn-soft" onClick={() => setEditPaq({ ...editPaq, articulos: [...editPaq.articulos, { nombre: "", cantidad: 1 }] })}><Plus size={12} /> Agregar artículo</button>
+            </div>
+            <div className="flex flex-col gap-2 max-h-[220px] overflow-y-auto pr-1">
+              {editPaq.articulos.length === 0 && <p className="text-[12.5px] m-0" style={{ color: "var(--ink-faint)" }}>Sin artículos. Agrega uno o elige un tipo de paquete arriba.</p>}
+              {editPaq.articulos.map((a, i) => (
+                <div key={i} className="flex items-center gap-2">
+                  <input className="input" style={{ flex: 1 }} placeholder="Nombre del artículo" value={a.nombre} onChange={(e) => cambiarArticulos(i, "nombre", e.target.value)} />
+                  <input type="number" min={1} className="input" style={{ width: 76 }} value={a.cantidad} onChange={(e) => cambiarArticulos(i, "cantidad", e.target.value)} />
+                  <button className="icon-btn danger" title="Quitar" onClick={() => setEditPaq({ ...editPaq, articulos: editPaq.articulos.filter((_, j) => j !== i) })}><Trash2 size={14} /></button>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <Field label="Nota / acuerdo" className="mt-4">
+            <textarea className="textarea" placeholder="Ej: Acuerdo con la directiva 2025-2026" value={editPaq.nota} onChange={(e) => setEditPaq({ ...editPaq, nota: e.target.value })} />
+          </Field>
+        </Modal>
+      )}
+
       <span className="hidden"><RefreshCw size={1} /></span>
     </div>
   );

@@ -1,11 +1,11 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import type {
   Config, Cotizacion, Docente, Escuela, Estudiante, Evento, HistorialTasa,
-  MensajeLog, OcrDraft, Pago, Rol, Sesion, Usuario,
+  MensajeLog, OcrDraft, Pago, PaqueteEscuela, Rol, Sesion, Usuario,
 } from "./data";
 import {
   API_DOLARES, API_EUROS, SEED_CONFIG, SEED_COTIZACIONES, SEED_DOCENTES, SEED_ESCUELAS,
-  SEED_ESTUDIANTES, SEED_EVENTOS, SEED_HISTORIAL, SEED_SESIONES, SEED_USUARIOS,
+  SEED_ESTUDIANTES, SEED_EVENTOS, SEED_HISTORIAL, SEED_PAQUETES_ESCUELAS, SEED_SESIONES, SEED_USUARIOS,
   estudianteTotales, todayISO, uid,
 } from "./data";
 import { sbClient, probarConexion, subirTodo, descargarTodo, rowsToDb } from "./supabase";
@@ -33,7 +33,8 @@ export const ROUTE_TITLE: Record<Route, string> = {
 interface DB {
   escuelas: Escuela[]; docentes: Docente[]; estudiantes: Estudiante[]; cotizaciones: Cotizacion[];
   sesiones: Sesion[]; eventos: Evento[]; mensajes: MensajeLog[]; usuarios: Usuario[];
-  historialTasas: HistorialTasa[]; config: Config; currentUserId: string;
+  historialTasas: HistorialTasa[]; paquetesEscuelas: PaqueteEscuela[];
+  config: Config; currentUserId: string;
   seqPedido: number; seqCot: number;
 }
 
@@ -48,7 +49,8 @@ interface ToastItem { id: string; text: string; tone: "ok" | "warn" | "err" }
 const seedDB = (): DB => ({
   escuelas: SEED_ESCUELAS, docentes: SEED_DOCENTES, estudiantes: SEED_ESTUDIANTES,
   cotizaciones: SEED_COTIZACIONES, sesiones: SEED_SESIONES, eventos: SEED_EVENTOS,
-  mensajes: [], usuarios: SEED_USUARIOS, historialTasas: SEED_HISTORIAL, config: SEED_CONFIG,
+  mensajes: [], usuarios: SEED_USUARIOS, historialTasas: SEED_HISTORIAL,
+  paquetesEscuelas: SEED_PAQUETES_ESCUELAS, config: SEED_CONFIG,
   currentUserId: "u1", seqPedido: 2411, seqCot: 303,
 });
 
@@ -59,6 +61,7 @@ const loadDB = (): DB => {
       const d = JSON.parse(raw);
       if (d && d.estudiantes && d.config) {
         if (!Array.isArray(d.historialTasas)) d.historialTasas = SEED_HISTORIAL;
+        if (!Array.isArray(d.paquetesEscuelas)) d.paquetesEscuelas = SEED_PAQUETES_ESCUELAS;
         return d as DB;
       }
     }
@@ -100,6 +103,7 @@ interface Ctx {
   addMensaje: (m: MensajeLog) => void;
   saveUsuario: (u: Usuario) => void; deleteUsuario: (id: string) => void;
   setConfig: (patch: Partial<Config>) => void;
+  savePaqueteEscuela: (p: PaqueteEscuela) => void; deletePaqueteEscuela: (id: string) => void;
   exportBackup: () => string; importBackup: (json: string) => boolean;
   syncInfo: { last: number; ok: boolean; msg: string } | null; syncing: boolean;
   testCloud: (urlArg?: string, keyArg?: string) => Promise<{ tablas: number; filas: number }>;
@@ -281,6 +285,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const saveUsuario = useCallback((u: Usuario) => mutate((d) => ({ ...d, usuarios: d.usuarios.some((x) => x.id === u.id) ? d.usuarios.map((x) => (x.id === u.id ? u : x)) : [...d.usuarios, u] })), [mutate]);
   const deleteUsuario = useCallback((id: string) => mutate((d) => ({ ...d, usuarios: d.usuarios.filter((x) => x.id !== id) })), [mutate]);
   const setConfig = useCallback((patch: Partial<Config>) => mutate((d) => ({ ...d, config: { ...d.config, ...patch } })), [mutate]);
+
+  /* Paquetes asignados a escuelas */
+  const savePaqueteEscuela = useCallback((p: PaqueteEscuela) => mutate((d) => ({ ...d, paquetesEscuelas: d.paquetesEscuelas.some((x) => x.id === p.id) ? d.paquetesEscuelas.map((x) => (x.id === p.id ? p : x)) : [...d.paquetesEscuelas, p] })), [mutate]);
+  const deletePaqueteEscuela = useCallback((id: string) => mutate((d) => ({ ...d, paquetesEscuelas: d.paquetesEscuelas.filter((x) => x.id !== id) })), [mutate]);
   const deleteTasaHistorial = useCallback((id: string) => setDb((d) => ({ ...d, historialTasas: d.historialTasas.filter((h) => h.id !== id) })), []);
   const clearTasaHistorial = useCallback(() => setDb((d) => ({ ...d, historialTasas: [] })), []);
 
@@ -382,7 +390,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     addPago, deletePago, setPedidoEstado, saveCodigos,
     saveCotizacion, deleteCotizacion, convertirCotizacion,
     saveSesion, deleteSesion, saveEvento, deleteEvento, addMensaje,
-    saveUsuario, deleteUsuario, setConfig, exportBackup, importBackup,
+    saveUsuario, deleteUsuario, setConfig,
+    savePaqueteEscuela, deletePaqueteEscuela,
+    exportBackup, importBackup,
     syncInfo, syncing, testCloud, syncToCloud, restoreFromCloud, alerts,
   };
 

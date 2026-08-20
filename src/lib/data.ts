@@ -42,11 +42,26 @@ export interface Config {
 
 export interface OcrDraft { nombre: string; ci: string; fecha: string; raw: string; }
 
+/* Paquete asignado a una escuela: nombre propio, tipo base y artículos editables */
+export interface PaqueteEscuelaItem { nombre: string; cantidad: number; }
+export interface PaqueteEscuela {
+  id: string;
+  escuelaId: string;
+  nombre: string;            // nombre del paquete (ej: "Paquete VIP San Agustín")
+  tipoPaqueteId: string;     // basico | premium | lujo | personalizado
+  precio: number;            // precio negociado con la escuela
+  articulos: PaqueteEscuelaItem[];
+  nota: string;
+  activo: boolean;
+  creado: string;
+}
+
 /* Forma completa de la base del CRM (la usa el sincronizador de Supabase) */
 export interface CRMData {
   escuelas: Escuela[]; docentes: Docente[]; estudiantes: Estudiante[];
   cotizaciones: Cotizacion[]; sesiones: Sesion[]; eventos: Evento[];
   mensajes: MensajeLog[]; usuarios: Usuario[]; historialTasas: HistorialTasa[];
+  paquetesEscuelas: PaqueteEscuela[];
   config: Config; currentUserId: string; seqPedido: number; seqCot: number;
 }
 
@@ -58,6 +73,7 @@ export const DB_TABLES: { tabla: string; modulo: string }[] = [
   { tabla: "pagos", modulo: "Pagos y abonos" },
   { tabla: "adicionales_items", modulo: "Adicionales vendidos" },
   { tabla: "cotizaciones", modulo: "Cotizaciones" },
+  { tabla: "paquetes_escuelas", modulo: "Paquetes por escuela" },
   { tabla: "cotizacion_items", modulo: "Ítems de cotización" },
   { tabla: "sesiones", modulo: "Sesiones fotográficas" },
   { tabla: "eventos", modulo: "Agenda" },
@@ -278,6 +294,29 @@ export const SEED_DOCENTES: Docente[] = [
   { id: "do3", nombre: "Ana Torres", telefono: "0412-333.44.55", escuelaId: "es3", correo: "ana.t@correo.com", observaciones: "Preescolar" },
 ];
 
+/* Paquetes negociados y asignados a cada escuela */
+const artDe = (tipo: "basico" | "premium" | "lujo", extra?: PaqueteEscuelaItem[]): PaqueteEscuelaItem[] => [
+  ...PAQUETES[tipo].incluye.map((nombre) => ({ nombre, cantidad: 1 })),
+  ...(extra || []),
+];
+export const SEED_PAQUETES_ESCUELAS: PaqueteEscuela[] = [
+  {
+    id: uid(), escuelaId: "es1", nombre: "Paquete Premium San Agustín", tipoPaqueteId: "premium", precio: 45,
+    articulos: artDe("premium", [{ nombre: "Taza con logo del colegio", cantidad: 1 }]),
+    nota: "Acuerdo con la directiva 2025-2026 · incluye taza conmemorativa.", activo: true, creado: todayISO(),
+  },
+  {
+    id: uid(), escuelaId: "es2", nombre: "Paquete Lujo Bachilleres Samanes", tipoPaqueteId: "lujo", precio: 65,
+    articulos: artDe("lujo", [{ nombre: "Anillo de promoción", cantidad: 1 }]),
+    nota: "Promoción 2026 · anillo con grabado del nombre.", activo: true, creado: todayISO(),
+  },
+  {
+    id: uid(), escuelaId: "es3", nombre: "Paquete Preescolar Rosario", tipoPaqueteId: "basico", precio: 22,
+    articulos: artDe("basico"),
+    nota: "Precio social acordado para preescolar.", activo: true, creado: todayISO(),
+  },
+];
+
 const codVacio = () => ({ carnetAlumno: "", carnetRep: "", firmaLibro: "", togaBirrete: "", fotoLibre: "", fotoAdicional: "" });
 let codSeq = 2401;
 const nextCod = () => `F-${codSeq++}`;
@@ -473,12 +512,25 @@ create table if not exists configuracion (
   current_user_id text default ''
 );
 
+create table if not exists paquetes_escuelas (
+  id text primary key,
+  escuela_id text not null references escuelas(id) on delete cascade,
+  nombre text not null,
+  tipo_paquete_id text default 'personalizado',
+  precio numeric(12,2) default 0,
+  articulos jsonb default '[]'::jsonb,
+  nota text default '',
+  activo boolean default true,
+  creado text default ''
+);
+
 -- Índices para consultas rápidas
 create index if not exists idx_estudiantes_escuela on estudiantes(escuela_id);
 create index if not exists idx_estudiantes_pedido on estudiantes(pedido);
 create index if not exists idx_pagos_estudiante on pagos(estudiante_id);
 create index if not exists idx_adicionales_estudiante on adicionales_items(estudiante_id);
 create index if not exists idx_cotizacion_items on cotizacion_items(cotizacion_id);
+create index if not exists idx_paquetes_escuelas on paquetes_escuelas(escuela_id);
 
 -- Row Level Security: acceso abierto con la anon key.
 -- En producción se recomienda restringir con Supabase Auth.
