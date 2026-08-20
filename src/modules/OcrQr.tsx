@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import Tesseract from "tesseract.js";
 import {
   Aperture, Camera, CameraOff, Check, Copy, Eye, KeyRound, Loader2, RotateCw, ScanLine,
-  Search, ShieldCheck, Sparkles, Upload, UserPlus, ZoomIn, ZoomOut,
+  Search, Settings, ShieldCheck, Sparkles, Upload, UserPlus, ZoomIn, ZoomOut,
 } from "lucide-react";
 import { useApp } from "../lib/store";
 import { OCR_CRED, fmtBs, parseOcr } from "../lib/data";
@@ -129,11 +129,10 @@ export function OcrModal({ onClose }: { onClose: () => void }) {
       title={<span className="flex items-center gap-2.5"><GoogleG /> Escáner OCR <span className="text-[12px] font-semibold px-2 py-0.5 rounded-full" style={{ background: "var(--blue-tint-2)", color: "var(--blue)" }}>Google Cloud Vision · IA</span></span>}
       subtitle="Digitaliza C.I. y partidas de nacimiento venezolanas — el OCR corre en tu navegador">
 
-      {/* Credenciales de la cuenta de servicio */}
-      <div className="rounded-xl p-3 mb-4 flex flex-wrap gap-x-5 gap-y-1.5 text-[11.5px]" style={{ background: "var(--surface-2)", color: "var(--ink-soft)" }}>
-        <span className="flex items-center gap-1.5"><ShieldCheck size={13} style={{ color: "var(--green)" }} /> {OCR_CRED.email}</span>
-        <span className="flex items-center gap-1.5"><Search size={13} style={{ color: "var(--blue)" }} /> ID {OCR_CRED.id}</span>
-        <span className="flex items-center gap-1.5"><KeyRound size={13} style={{ color: "var(--gold-deep)" }} /> CLAVE {OCR_CRED.clave.slice(0, 8)}••••</span>
+      {/* Estado de la conexión — las credenciales se administran en Configuración */}
+      <div className="rounded-xl p-3 mb-4 flex items-center gap-2.5 text-[12px]" style={{ background: "var(--green-tint)", color: "var(--ink-soft)" }}>
+        <ShieldCheck size={15} style={{ color: "var(--green)" }} />
+        <span>Conexión segura con <b className="font-display" style={{ color: "var(--ink)" }}>Google Cloud Vision</b> · cuenta de servicio configurada en <b className="font-display" style={{ color: "var(--blue)" }}>Configuración</b></span>
       </div>
 
       {/* Selector de modo */}
@@ -264,7 +263,7 @@ export function OcrModal({ onClose }: { onClose: () => void }) {
 /* ================= PÁGINA ESCÁNER ================= */
 
 export function OcrPage() {
-  const { db, setOcrOpen, tasa } = useApp();
+  const { db, setOcrOpen, tasa, setRoute } = useApp();
   const conCi = db.estudiantes.filter((e) => e.ci.trim() !== "").length;
   return (
     <div className="page">
@@ -315,24 +314,25 @@ export function OcrPage() {
         </div>
 
         <div className="card p-5">
-          <h3 className="font-display font-bold text-[16px] m-0 mb-3">Cuenta de servicio OCR</h3>
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="font-display font-bold text-[16px] m-0">Motor OCR</h3>
+            <span className="badge" style={{ background: "var(--green-tint)", color: "var(--green)" }}><span className="dot pulse-dot" /> Cuenta activa</span>
+          </div>
           <div className="flex flex-col gap-2 text-[12.5px]">
             <div className="flex items-center gap-2 p-2.5 rounded-lg" style={{ background: "var(--surface-2)" }}>
               <ShieldCheck size={14} style={{ color: "var(--green)" }} />
-              <span className="truncate flex-1">{OCR_CRED.email}</span>
+              <span className="truncate flex-1">Cuenta de servicio <b>{OCR_CRED.email.split("@")[0]}</b>@••• vinculada</span>
             </div>
             <div className="flex items-center gap-2 p-2.5 rounded-lg" style={{ background: "var(--surface-2)" }}>
-              <Search size={14} style={{ color: "var(--blue)" }} />
-              <span className="truncate flex-1">ID único: {OCR_CRED.id}</span>
-            </div>
-            <div className="flex items-center gap-2 p-2.5 rounded-lg" style={{ background: "var(--surface-2)" }}>
-              <KeyRound size={14} style={{ color: "var(--gold-deep)" }} />
-              <span className="truncate flex-1">CLAVE: {OCR_CRED.clave}</span>
+              <Sparkles size={14} style={{ color: "var(--gold-deep)" }} />
+              <span className="truncate flex-1">Google Cloud Vision · IA en tu navegador</span>
             </div>
           </div>
-          <p className="text-[11.5px] mt-3 mb-0" style={{ color: "var(--ink-faint)" }}>
+          <p className="text-[11.5px] mt-3 mb-2" style={{ color: "var(--ink-faint)" }}>
+            Por seguridad, el correo, ID único y CLAVE se administran en <b style={{ color: "var(--ink-soft)" }}>Administración → Configuración</b>.
             Tasa aplicada hoy en los abonos: <b style={{ color: "var(--blue)" }}>{fmtBs(tasa.usd)}</b> por $1.
           </p>
+          <button className="btn btn-soft btn-sm" onClick={() => setRoute("config")}><Settings size={14} /> Ver credenciales en Configuración</button>
         </div>
       </div>
     </div>

@@ -1,6 +1,6 @@
 import React, { useMemo, useRef, useState } from "react";
 import {
-  Check, Clock, Database, Download, Euro, Eye, EyeOff, Globe, History, KeyRound, Pencil, Plug,
+  Check, Clock, Copy, Database, Download, Euro, Eye, EyeOff, Globe, History, KeyRound, Pencil, Plug,
   Plus, RefreshCw, ScanLine, ShieldCheck, Smartphone, Trash2, Upload, UserCog,
 } from "lucide-react";
 import { useApp } from "../lib/store";
@@ -134,12 +134,17 @@ export function Usuarios() {
 /* ================= CONFIGURACIÓN ================= */
 
 export function Configuracion() {
-  const { db, setConfig, confirm, success, toast, tasa, refreshTasa, setRoute, aplicarTasaManual } = useApp();
+  const { db, setConfig, confirm, success, toast, tasa, refreshTasa, setRoute, aplicarTasaManual, setOcrOpen } = useApp();
   const nowCfg = useNow(1000);
   const [emp, setEmp] = useState({ ...db.config.empresa });
   const [fallback, setFallback] = useState(String(db.config.tasaManualUSD || db.config.tasaFallback));
   const [nuevoMetodo, setNuevoMetodo] = useState("");
   const [nuevoEsBs, setNuevoEsBs] = useState(false);
+  const [verClaveOcr, setVerClaveOcr] = useState(false);
+
+  const copiar = (texto: string, que: string) => {
+    navigator.clipboard?.writeText(texto).then(() => toast(`${que} copiado al portapapeles`, "ok")).catch(() => toast("No se pudo copiar", "err"));
+  };
 
   const guardarEmpresa = async () => {
     const ok = await confirm({ title: "¿Desea guardar este registro?", message: "Verifique la información antes de continuar.", confirmText: "Sí, Guardar" });
@@ -222,6 +227,37 @@ export function Configuracion() {
             <button className="btn btn-soft" onClick={toggleApi}>{db.config.usarTasaManual || !db.config.usarApi ? "Usar API" : "Pausar API"}</button>
           </div>
           <button className="btn btn-ghost btn-sm mt-3" onClick={() => setRoute("integraciones")}><History size={13} /> Ver historial diario de tasas</button>
+        </div>
+
+        {/* Cuenta de servicio OCR */}
+        <div className="card p-5">
+          <div className="flex items-start justify-between mb-1">
+            <div className="w-11 h-11 rounded-xl flex items-center justify-center" style={{ background: "var(--blue-tint-2)", color: "var(--blue)" }}><ScanLine size={21} /></div>
+            <Badge tone="green" dot>Cuenta conectada</Badge>
+          </div>
+          <SectionHead title="Cuenta de servicio OCR" desc="Credenciales de Google Cloud Vision que usa el escáner — visibles solo aquí" />
+          <div className="flex flex-col gap-2 text-[12.5px]">
+            <div className="flex items-center gap-2 p-2.5 rounded-lg" style={{ background: "var(--surface-2)" }}>
+              <ShieldCheck size={14} style={{ color: "var(--green)" }} />
+              <span className="truncate flex-1 font-semibold">{OCR_CRED.email}</span>
+              <button className="icon-btn" style={{ width: 30, height: 30 }} title="Copiar correo" onClick={() => copiar(OCR_CRED.email, "Correo")}><Copy size={13} /></button>
+            </div>
+            <div className="flex items-center gap-2 p-2.5 rounded-lg" style={{ background: "var(--surface-2)" }}>
+              <Database size={14} style={{ color: "var(--blue)" }} />
+              <span className="truncate flex-1">ID único: <b className="font-display">{OCR_CRED.id}</b></span>
+              <button className="icon-btn" style={{ width: 30, height: 30 }} title="Copiar ID" onClick={() => copiar(OCR_CRED.id, "ID único")}><Copy size={13} /></button>
+            </div>
+            <div className="flex items-center gap-2 p-2.5 rounded-lg" style={{ background: "var(--surface-2)" }}>
+              <KeyRound size={14} style={{ color: "var(--gold-deep)" }} />
+              <span className="truncate flex-1 font-display tracking-wide">{verClaveOcr ? OCR_CRED.clave : "••••••••••••••••••••••••"}</span>
+              <button className="icon-btn" style={{ width: 30, height: 30 }} title={verClaveOcr ? "Ocultar clave" : "Mostrar clave"} onClick={() => setVerClaveOcr((v) => !v)}>{verClaveOcr ? <EyeOff size={13} /> : <Eye size={13} />}</button>
+              <button className="icon-btn" style={{ width: 30, height: 30 }} title="Copiar clave" onClick={() => copiar(OCR_CRED.clave, "CLAVE")}><Copy size={13} /></button>
+            </div>
+          </div>
+          <p className="text-[11.5px] mt-3 mb-3" style={{ color: "var(--ink-faint)" }}>
+            La CLAVE queda oculta en el escáner y en el resto del sistema por seguridad.
+          </p>
+          <button className="btn btn-gold btn-sm" onClick={() => setOcrOpen(true)}><ScanLine size={14} /> Abrir escáner OCR</button>
         </div>
 
         {/* Métodos de pago */}
@@ -487,32 +523,6 @@ export function Integraciones() {
               Guardar automáticamente la tasa de cada día en el historial
             </label>
           </div>
-        </div>
-
-        {/* OCR */}
-        <div className="card p-5" style={{ animationDelay: "60ms" }}>
-          <div className="flex items-start justify-between mb-3">
-            <div className="w-11 h-11 rounded-xl flex items-center justify-center" style={{ background: "var(--blue-tint-2)", color: "var(--blue)" }}><ScanLine size={21} /></div>
-            <Badge tone="blue" dot>IA de Google · corre en tu navegador</Badge>
-          </div>
-          <h3 className="font-display font-bold text-[16px] m-0">Escáner OCR — Google Cloud Vision</h3>
-          <p className="text-[12.5px] mt-1 mb-3" style={{ color: "var(--ink-soft)" }}>Credenciales de la cuenta de servicio del proyecto OCR.</p>
-          <div className="flex flex-col gap-2 text-[12.5px]">
-            <div className="flex items-center gap-2 p-2.5 rounded-lg" style={{ background: "var(--surface-2)" }}>
-              <ShieldCheck size={14} style={{ color: "var(--green)" }} />
-              <span className="truncate flex-1">{OCR_CRED.email}</span>
-            </div>
-            <div className="flex items-center gap-2 p-2.5 rounded-lg" style={{ background: "var(--surface-2)" }}>
-              <KeyRound size={14} style={{ color: "var(--gold-deep)" }} />
-              <span className="truncate flex-1">{verClave ? OCR_CRED.clave : "••••••••••••••••••••••••"}</span>
-              <button className="icon-btn" style={{ width: 30, height: 30 }} onClick={() => setVerClave((v) => !v)}>{verClave ? <EyeOff size={14} /> : <Eye size={14} />}</button>
-            </div>
-            <div className="flex items-center gap-2 p-2.5 rounded-lg" style={{ background: "var(--surface-2)" }}>
-              <Database size={14} style={{ color: "var(--blue)" }} />
-              <span>ID único: {OCR_CRED.id}</span>
-            </div>
-          </div>
-          <button className="btn btn-gold btn-sm mt-3" onClick={() => setOcrOpen(true)}><ScanLine size={14} /> Abrir escáner</button>
         </div>
 
         {/* WhatsApp */}
