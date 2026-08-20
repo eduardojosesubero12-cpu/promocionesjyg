@@ -1,9 +1,9 @@
 import React, { useMemo, useState } from "react";
 import QRCode from "react-qr-code";
-import { Printer, Search, Ticket as TicketIcon, School, Users } from "lucide-react";
+import { CheckCircle2, Printer, Search, Smartphone, Ticket as TicketIcon, School, Users } from "lucide-react";
 import { useApp } from "../lib/store";
 import type { Estudiante, Pago } from "../lib/data";
-import { PAQUETES, estudianteTotales, fmtBs, fmtUSD, fmtFecha, todayISO } from "../lib/data";
+import { PAQUETES, estudianteTotales, fmtBs, fmtUSD, fmtFecha, todayISO, uid, waLink } from "../lib/data";
 import { EmptyState, Badge } from "../components/ui";
 
 /* ---------- Código de barras decorativo (a partir del pedido) ---------- */
@@ -44,6 +44,59 @@ function PagoRow({ p, tasaHoy }: { p: Pago; tasaHoy: number }) {
       </div>
     </div>
   );
+}
+
+/* ---------- Texto del ticket para WhatsApp ---------- */
+export function textoTicket(opts: {
+  est: Estudiante; escuelaNombre: string; docenteNombre: string; tasaHoy: number; empresa: { nombre: string; rif: string; telefono: string; direccion: string };
+}): string {
+  const { est, escuelaNombre, docenteNombre, tasaHoy, empresa } = opts;
+  const t = estudianteTotales(est);
+  const pagado = t.saldo <= 0.009;
+  const folio = `${est.pedido}-${todayISO().split("-").join("")}`;
+  const num = (n: number) => n.toLocaleString("es-VE", { maximumFractionDigits: 2 });
+  const sep = "━━━━━━━━━━━━━━━━";
+  const L: string[] = [];
+
+  L.push(`🧾 *${empresa.nombre.toUpperCase()}*`);
+  if (empresa.rif) L.push(`RIF: ${empresa.rif}`);
+  if (empresa.direccion) L.push(empresa.direccion);
+  if (empresa.telefono) L.push(`📞 ${empresa.telefono}`);
+  L.push(sep);
+  L.push(`*TICKET DE PAGO* · Pedido ${est.pedido}`);
+  L.push(`Folio: ${folio} · ${fmtFecha(todayISO())}`);
+  L.push("");
+  L.push(`👨‍🎓 *Estudiante:* ${est.nombre}`);
+  if (est.ci) L.push(`C.I.: ${est.ci}`);
+  L.push(`🏫 Escuela: ${escuelaNombre || "Por asignar"}`);
+  L.push(`📚 Grado: ${est.grado} · Sección “${est.seccion}”`);
+  L.push(`👩‍🏫 Profesor(a): ${docenteNombre || "Por asignar"}`);
+  if (est.representante) L.push(`👤 Representante: ${est.representante}`);
+  L.push("");
+  L.push(`📦 *Paquete ${PAQUETES[est.paqueteId].nombre}* — ${fmtUSD(est.precioPaquete)}`);
+  est.adicionales.forEach((a) => L.push(`   + ${a.cantidad}× ${a.producto}${a.talla ? ` (Talla ${a.talla})` : ""} — ${fmtUSD(a.cantidad * a.precio)}`));
+  L.push("");
+  L.push(`💵 *Abonos registrados (${est.pagos.length})*`);
+  if (est.pagos.length === 0) L.push("   Sin abonos todavía.");
+  est.pagos.forEach((p, i) => {
+    const tasaP = p.tasa || tasaHoy;
+    const montoUsd = p.bs ? (p.tasa ? p.monto / p.tasa : p.usd) : p.monto;
+    const montoBs = p.bs ? p.monto : p.usd * tasaP;
+    L.push(`${i + 1}. ${fmtFecha(p.fecha)} · ${p.metodo}`);
+    L.push(`   ${fmtUSD(montoUsd)} ⇄ Bs. ${num(montoBs)} (tasa ${num(tasaP)})`);
+    if (p.referencia) L.push(`   Ref: ${p.referencia}`);
+  });
+  L.push(sep);
+  L.push(`Total del paquete: *${fmtUSD(t.total)}* = Bs. ${num(t.total * tasaHoy)}`);
+  L.push(`Abonado: ${fmtUSD(t.abonado)} = Bs. ${num(t.abonado * tasaHoy)}`);
+  L.push(pagado
+    ? `✅ *SALDO: $0.00 — PAGADO COMPLETO*`
+    : `⚠️ *SALDO PENDIENTE: ${fmtUSD(t.saldo)}* = Bs. ${num(t.saldo * tasaHoy)}`);
+  L.push(`(Tasa del día: Bs. ${num(tasaHoy)} por $1)`);
+  L.push("");
+  L.push(`🔐 La tarjeta de grado incluye un código QR para verificar este pago.`);
+  L.push("¡Gracias por su compra! 🎓");
+  return L.join("\n");
 }
 
 /* ---------- Ticket térmico ---------- */
@@ -154,11 +207,12 @@ export function Ticket({ est, escuelaNombre, docenteNombre, tasaHoy, now }: {
 
 /* ---------- Página de Facturación ---------- */
 export default function Facturas() {
-  const { db, tasa, param, setParam } = useApp();
+  const { db, tasa, param, setParam, addMensaje, toast, success } = useApp();
   const [q, setQ] = useState("");
   const [fEscuela, setFEscuela] = useState("");
   const [printEst, setPrintEst] = useState<Estudiante | null>(null);
   const [now, setNow] = useState(Date.now());
+  const [enviados, setEnviados] = useState<Record<string, number>>({});
 
   // reloj vivo para la hora de emisión
   React.useEffect(() => {
@@ -185,6 +239,31 @@ export default function Facturas() {
     setTimeout(() => setPrintEst(null), 1400);
   };
 
+  /* Enviar el ticket por WhatsApp al representante del estudiante */
+  const enviarWhatsApp = (e?: Estudiante) => {
+    const est = e || sel;
+    if (!est) return;
+    if (!est.telefono) {
+      toast("Ese estudiante no tiene teléfono registrado — edítalo en Estudiantes", "err");
+      return;
+    }
+    const texto = textoTicket({
+      est,
+      escuelaNombre: escuelaDe(est.escuelaId)?.nombre || "",
+      docenteNombre: docenteDe(est.docenteId)?.nombre || "",
+      tasaHoy: tasa.usd,
+      empresa: db.config.empresa,
+    });
+    window.open(waLink(est.telefono, texto), "_blank");
+    addMensaje({
+      id: uid(), fecha: todayISO(),
+      destinatario: est.representante || est.nombre, telefono: est.telefono,
+      plantilla: "Ticket de pago (Facturación)", texto,
+    });
+    setEnviados((v) => ({ ...v, [est.id]: Date.now() }));
+    success("Ticket enviado por WhatsApp");
+  };
+
   return (
     <div className="page">
       <div className="page-head">
@@ -192,12 +271,18 @@ export default function Facturas() {
           <div className="crumb">Operaciones</div>
           <h1>Facturación</h1>
           <p style={{ fontSize: 13.5, margin: "4px 0 0", color: "var(--ink-soft)" }}>
-            Ticket de pago estilo impresora térmica · datos de la empresa, abonos divisa ⇄ bolívares y QR del estudiante
+            Ticket de pago estilo impresora térmica · datos de la empresa, abonos divisa ⇄ bolívares y QR del estudiante · envío directo por WhatsApp
           </p>
         </div>
-        <button className="btn btn-primary" onClick={imprimir} disabled={!sel}>
-          <Printer size={15} /> Imprimir ticket
-        </button>
+        <div className="flex gap-2 flex-wrap">
+          <button className="btn btn-ghost" onClick={imprimir} disabled={!sel}>
+            <Printer size={15} /> Imprimir ticket
+          </button>
+          <button className="btn btn-primary" style={{ background: "linear-gradient(150deg, #25d366, #128c4b)", boxShadow: "0 8px 20px -8px rgba(37,211,102,0.55)" }}
+            onClick={() => enviarWhatsApp()} disabled={!sel}>
+            <Smartphone size={15} /> Enviar por WhatsApp
+          </button>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-[360px_1fr] gap-5">
@@ -228,6 +313,13 @@ export default function Facturas() {
                     <span className="block text-[11px]" style={{ color: "var(--ink-faint)" }}>{e.pedido} · {escuelaDe(e.escuelaId)?.nombre || "—"}</span>
                   </span>
                   <Badge tone={t.saldo > 0 ? "red" : "green"} dot>{t.saldo > 0 ? fmtUSD(t.saldo) : "Pagado"}</Badge>
+                  {e.telefono && (
+                    <span role="button" title={`Enviar ticket de ${e.nombre} por WhatsApp`} onClick={(ev) => { ev.stopPropagation(); enviarWhatsApp(e); }}
+                      className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 transition-all hover:scale-110"
+                      style={{ background: "var(--green-tint)", color: "#128c4b" }}>
+                      <Smartphone size={13} />
+                    </span>
+                  )}
                 </button>
               );
             })}
@@ -250,6 +342,21 @@ export default function Facturas() {
                 <School size={13} /> {escuelaDe(sel.escuelaId)?.nombre || "Escuela sin asignar"}
                 <span>·</span>
                 <Users size={13} /> {docenteDe(sel.docenteId)?.nombre || "Profesor sin asignar"}
+              </div>
+
+              {/* Acción WhatsApp del estudiante seleccionado */}
+              <div className="flex items-center justify-center gap-2.5 mt-4 flex-wrap">
+                <button className="btn btn-sm" style={{ background: "var(--green-tint)", color: "#128c4b", border: "1.5px solid #25d36655" }}
+                  onClick={() => enviarWhatsApp(sel)} disabled={!sel.telefono}>
+                  <Smartphone size={14} />
+                  {sel.telefono ? `Enviar al ${sel.representante ? "representante" : "estudiante"} · ${sel.telefono}` : "Sin teléfono registrado"}
+                </button>
+                {enviados[sel.id] && (
+                  <span className="flex items-center gap-1.5 text-[11.5px] font-display font-semibold" style={{ color: "var(--green)" }}>
+                    <CheckCircle2 size={14} />
+                    Enviado a las {new Date(enviados[sel.id]).toLocaleTimeString("es-VE", { hour: "2-digit", minute: "2-digit" })}
+                  </span>
+                )}
               </div>
             </div>
           ) : (
