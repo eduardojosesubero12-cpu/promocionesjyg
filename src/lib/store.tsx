@@ -33,7 +33,8 @@ export const ROUTE_TITLE: Record<Route, string> = {
 interface DB {
   escuelas: Escuela[]; docentes: Docente[]; estudiantes: Estudiante[]; cotizaciones: Cotizacion[];
   sesiones: Sesion[]; eventos: Evento[]; mensajes: MensajeLog[]; usuarios: Usuario[];
-  historialTasas: HistorialTasa[]; config: Config; currentUserId: string;
+  historialTasas: HistorialTasa[]; paquetesEscuelas: PaqueteEscuela[];
+  config: Config; currentUserId: string;
   seqPedido: number; seqCot: number;
 }
 
