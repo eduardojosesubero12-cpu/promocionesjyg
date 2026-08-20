@@ -55,6 +55,10 @@ export function dbToRows(db: CRMData): Record<string, any[]> {
     historial_tasas: db.historialTasas.map((h) => ({
       id: h.id, fecha: h.fecha, usd: h.usd, euro: h.euro, paralelo: h.paralelo, fuente: h.fuente, actualizado: h.actualizado,
     })),
+    paquetes_escuelas: db.paquetesEscuelas.map((p) => ({
+      id: p.id, escuela_id: p.escuelaId || null, nombre: p.nombre, tipo_paquete_id: p.tipoPaqueteId,
+      precio: p.precio, articulos: p.articulos, nota: p.nota, activo: p.activo, creado: p.creado,
+    })),
     configuracion: [{
       id: "jyg", data: db.config, seq_pedido: db.seqPedido, seq_cot: db.seqCot,
       current_user_id: db.currentUserId,
@@ -115,6 +119,11 @@ export function rowsToDb(rows: Record<string, any[]>, base: CRMData): CRMData {
     historialTasas: (rows.historial_tasas || []).map((h) => ({
       id: h.id, fecha: h.fecha, usd: Number(h.usd), euro: Number(h.euro), paralelo: Number(h.paralelo), fuente: h.fuente || "dolarapi", actualizado: Number(h.actualizado) || 0,
     })),
+    paquetesEscuelas: (rows.paquetes_escuelas || []).map((p) => ({
+      id: p.id, escuelaId: p.escuela_id || "", nombre: p.nombre, tipoPaqueteId: p.tipo_paquete_id || "personalizado",
+      precio: Number(p.precio) || 0, articulos: p.articulos || [], nota: p.nota || "",
+      activo: !!p.activo, creado: p.creado || "",
+    })),
     config: cfg?.data ? { ...base.config, ...cfg.data } : base.config,
     currentUserId: cfg?.current_user_id || base.currentUserId,
     seqPedido: cfg?.seq_pedido ?? base.seqPedido,
@@ -142,7 +151,7 @@ export async function subirTodo(
 ): Promise<void> {
   const rows = dbToRows(db);
   // Orden con dependencias: padres primero
-  const orden = ["escuelas", "docentes", "estudiantes", "pagos", "adicionales_items", "cotizaciones", "cotizacion_items", "sesiones", "eventos", "mensajes", "usuarios", "historial_tasas", "configuracion"];
+  const orden = ["escuelas", "docentes", "estudiantes", "pagos", "adicionales_items", "cotizaciones", "cotizacion_items", "sesiones", "eventos", "mensajes", "usuarios", "historial_tasas", "paquetes_escuelas", "configuracion"];
   for (const tabla of orden) {
     onTabla?.(tabla, "busy");
     try {
