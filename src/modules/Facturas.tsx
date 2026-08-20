@@ -1,6 +1,10 @@
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useRef, useState } from "react";
 import QRCode from "react-qr-code";
-import { CheckCircle2, Printer, Search, Smartphone, Ticket as TicketIcon, School, Users } from "lucide-react";
+import { toPng } from "html-to-image";
+import {
+  CheckCircle2, Download, FileText, Loader2, Printer, Search, Smartphone,
+  Ticket as TicketIcon, School, Users,
+} from "lucide-react";
 import { useApp } from "../lib/store";
 import type { Estudiante, Pago } from "../lib/data";
 import { PAQUETES, estudianteTotales, fmtBs, fmtUSD, fmtFecha, todayISO, uid, waLink } from "../lib/data";
@@ -213,6 +217,8 @@ export default function Facturas() {
   const [printEst, setPrintEst] = useState<Estudiante | null>(null);
   const [now, setNow] = useState(Date.now());
   const [enviados, setEnviados] = useState<Record<string, number>>({});
+  const [capturando, setCapturando] = useState(false);
+  const ticketRef = useRef<HTMLDivElement>(null);
 
   // reloj vivo para la hora de emisión
   React.useEffect(() => {
@@ -264,6 +270,80 @@ export default function Facturas() {
     success("Ticket enviado por WhatsApp");
   };
 
+  /* ---------- Captura del ticket como imagen (PNG) ---------- */
+  const capturar = async (): Promise<Blob | null> => {
+    const node = ticketRef.current;
+    if (!node) { toast("Selecciona un estudiante primero", "warn"); return null; }
+    try {
+      const dataUrl = await toPng(node, { pixelRatio: 3, cacheBust: true });
+      const res = await fetch(dataUrl);
+      return await res.blob();
+    } catch {
+      toast("No se pudo capturar el ticket", "err");
+      return null;
+    }
+  };
+
+  const descargarBlob = (blob: Blob, nombre: string) => {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = nombre; a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 4000);
+  };
+
+  const descargarImagen = async () => {
+    setCapturando(true);
+    const blob = await capturar();
+    setCapturando(false);
+    if (!blob || !sel) return;
+    descargarBlob(blob, `ticket-${sel.pedido}-${todayISO()}.png`);
+    toast("Captura descargada como imagen", "ok");
+  };
+
+  /* Enviar la captura del ticket como imagen por WhatsApp */
+  const enviarImagen = async (e?: Estudiante) => {
+    const est = e || sel;
+    if (!est) return;
+    if (!est.telefono) { toast("Ese estudiante no tiene teléfono registrado — edítalo en Estudiantes", "err"); return; }
+    setCapturando(true);
+    const blob = await capturar();
+    setCapturando(false);
+    if (!blob) return;
+    const nombre = `ticket-${est.pedido}-${todayISO()}.png`;
+    const file = new File([blob], nombre, { type: "image/png" });
+    const nav = navigator as Navigator & { canShare?: (d: { files: File[] }) => boolean; share?: (d: any) => Promise<void> };
+    const t = estudianteTotales(est);
+
+    if (nav.canShare && nav.canShare({ files: [file] })) {
+      // Móvil: compartir la imagen directo (abre WhatsApp con la captura adjunta)
+      try {
+        await nav.share!({ files: [file], title: `Ticket ${est.pedido}`, text: `🧾 Ticket de pago — ${est.nombre}` });
+      } catch { return; /* el usuario canceló */ }
+    } else {
+      // Escritorio: descargar la imagen y abrir el chat para adjuntarla
+      descargarBlob(blob, nombre);
+      window.open(waLink(est.telefono, `🧾 ¡Hola${est.representante ? " " + est.representante : ""}! Adjunto la captura del ticket de pago de ${est.nombre} (${est.pedido}).`), "_blank");
+      toast("Captura descargada — adjúntala en el chat de WhatsApp que se abrió", "ok");
+    }
+
+    addMensaje({
+      id: uid(), fecha: todayISO(),
+      destinatario: est.representante || est.nombre, telefono: est.telefono,
+      plantilla: "Ticket de pago — captura (Facturación)",
+      texto: `📷 Captura del ticket ${est.pedido} — ${est.nombre}. Total ${fmtUSD(t.total)} · Abonado ${fmtUSD(t.abonado)} · Saldo ${fmtUSD(t.saldo)} (imagen adjunta).`,
+    });
+    setEnviados((v) => ({ ...v, [est.id]: Date.now() }));
+    success("Captura enviada");
+  };
+
+  /* Acceso rápido por fila: selecciona y envía la captura */
+  const enviarFila = async (e: Estudiante) => {
+    if (!e.telefono) { toast("Ese estudiante no tiene teléfono registrado", "err"); return; }
+    setParam({ est: e.id });
+    await new Promise((r) => setTimeout(r, 480)); // espera el render + animación del ticket
+    await enviarImagen(e);
+  };
+
   return (
     <div className="page">
       <div className="page-head">
@@ -271,16 +351,23 @@ export default function Facturas() {
           <div className="crumb">Operaciones</div>
           <h1>Facturación</h1>
           <p style={{ fontSize: 13.5, margin: "4px 0 0", color: "var(--ink-soft)" }}>
-            Ticket de pago estilo impresora térmica · datos de la empresa, abonos divisa ⇄ bolívares y QR del estudiante · envío directo por WhatsApp
+            Ticket de pago estilo impresora térmica · captura como imagen y envío directo por WhatsApp
           </p>
         </div>
         <div className="flex gap-2 flex-wrap">
-          <button className="btn btn-ghost" onClick={imprimir} disabled={!sel}>
-            <Printer size={15} /> Imprimir ticket
-          </button>
           <button className="btn btn-primary" style={{ background: "linear-gradient(150deg, #25d366, #128c4b)", boxShadow: "0 8px 20px -8px rgba(37,211,102,0.55)" }}
-            onClick={() => enviarWhatsApp()} disabled={!sel}>
-            <Smartphone size={15} /> Enviar por WhatsApp
+            onClick={() => enviarImagen()} disabled={!sel || capturando}>
+            {capturando ? <Loader2 size={15} className="spin" /> : <Smartphone size={15} />}
+            {capturando ? "Capturando…" : "Enviar captura por WhatsApp"}
+          </button>
+          <button className="btn btn-ghost" onClick={descargarImagen} disabled={!sel || capturando}>
+            <Download size={15} /> Descargar captura
+          </button>
+          <button className="btn btn-ghost" onClick={imprimir} disabled={!sel}>
+            <Printer size={15} /> Imprimir
+          </button>
+          <button className="btn btn-ghost" onClick={() => enviarWhatsApp()} disabled={!sel} title="Enviar el ticket como texto">
+            <FileText size={15} /> Enviar texto
           </button>
         </div>
       </div>
@@ -314,7 +401,7 @@ export default function Facturas() {
                   </span>
                   <Badge tone={t.saldo > 0 ? "red" : "green"} dot>{t.saldo > 0 ? fmtUSD(t.saldo) : "Pagado"}</Badge>
                   {e.telefono && (
-                    <span role="button" title={`Enviar ticket de ${e.nombre} por WhatsApp`} onClick={(ev) => { ev.stopPropagation(); enviarWhatsApp(e); }}
+                    <span role="button" title={`Enviar captura del ticket de ${e.nombre} por WhatsApp`} onClick={(ev) => { ev.stopPropagation(); enviarFila(e); }}
                       className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 transition-all hover:scale-110"
                       style={{ background: "var(--green-tint)", color: "#128c4b" }}>
                       <Smartphone size={13} />
@@ -331,25 +418,33 @@ export default function Facturas() {
         <div className="flex flex-col items-center gap-4">
           {sel ? (
             <div className="reveal" key={sel.id}>
-              <Ticket
-                est={sel}
-                escuelaNombre={escuelaDe(sel.escuelaId)?.nombre || ""}
-                docenteNombre={docenteDe(sel.docenteId)?.nombre || ""}
-                tasaHoy={tasa.usd}
-                now={now}
-              />
+              {/* Contenedor que se captura como imagen */}
+              <div className="ticket-capture" ref={ticketRef}>
+                <Ticket
+                  est={sel}
+                  escuelaNombre={escuelaDe(sel.escuelaId)?.nombre || ""}
+                  docenteNombre={docenteDe(sel.docenteId)?.nombre || ""}
+                  tasaHoy={tasa.usd}
+                  now={now}
+                />
+              </div>
               <div className="flex items-center justify-center gap-2 text-[11.5px] mt-3" style={{ color: "var(--ink-faint)" }}>
                 <School size={13} /> {escuelaDe(sel.escuelaId)?.nombre || "Escuela sin asignar"}
                 <span>·</span>
                 <Users size={13} /> {docenteDe(sel.docenteId)?.nombre || "Profesor sin asignar"}
               </div>
 
-              {/* Acción WhatsApp del estudiante seleccionado */}
+              {/* Acciones WhatsApp del estudiante seleccionado */}
               <div className="flex items-center justify-center gap-2.5 mt-4 flex-wrap">
                 <button className="btn btn-sm" style={{ background: "var(--green-tint)", color: "#128c4b", border: "1.5px solid #25d36655" }}
-                  onClick={() => enviarWhatsApp(sel)} disabled={!sel.telefono}>
-                  <Smartphone size={14} />
-                  {sel.telefono ? `Enviar al ${sel.representante ? "representante" : "estudiante"} · ${sel.telefono}` : "Sin teléfono registrado"}
+                  onClick={() => enviarImagen(sel)} disabled={!sel.telefono || capturando}>
+                  {capturando ? <Loader2 size={14} className="spin" /> : <Smartphone size={14} />}
+                  {sel.telefono
+                    ? `${capturando ? "Capturando…" : "Enviar captura"} al ${sel.representante ? "representante" : "estudiante"} · ${sel.telefono}`
+                    : "Sin teléfono registrado"}
+                </button>
+                <button className="btn btn-ghost btn-sm" onClick={() => enviarWhatsApp(sel)} disabled={!sel.telefono} title="Enviar como texto">
+                  <FileText size={13} /> Texto
                 </button>
                 {enviados[sel.id] && (
                   <span className="flex items-center gap-1.5 text-[11.5px] font-display font-semibold" style={{ color: "var(--green)" }}>
