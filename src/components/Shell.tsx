@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   BarChart3, Bell, Boxes, CalendarDays, Camera, ChevronRight, Clock, Contact,
   GraduationCap, LayoutDashboard, Menu, MessageSquare, Moon, Package, Plug, QrCode, Receipt,
-  RefreshCw, ScanLine, School, Search, Settings, ShoppingBag, Sun, UserCog, Users, Wallet, X,
+  RefreshCw, ScanLine, School, Search, Settings, ShoppingBag, Sun, Ticket, UserCog, Users, Wallet, X,
 } from "lucide-react";
 import { useApp, ACCESS, ROUTE_TITLE } from "../lib/store";
 import type { Route } from "../lib/store";
@@ -32,6 +32,7 @@ const NAV: { section: string; items: { id: Route; label: string; icon: any }[] }
       { id: "produccion", label: "Producción", icon: Boxes },
       { id: "qr", label: "Tarjetas QR", icon: QrCode },
       { id: "ocr", label: "Escáner OCR", icon: ScanLine },
+      { id: "facturas", label: "Facturación", icon: Ticket },
     ],
   },
   {

@@ -14,6 +14,7 @@ import { OcrModal, OcrPage } from "./modules/OcrQr";
 import EtiquetasQRPage from "./modules/EtiquetasQR";
 import { Sesiones, Agenda, Mensajes } from "./modules/AgendaMensajes";
 import { Usuarios, Configuracion, Integraciones } from "./modules/Admin";
+import Facturas from "./modules/Facturas";
 
 const ROUTES: Record<Route, React.ComponentType> = {
   dashboard: Dashboard,
@@ -30,6 +31,7 @@ const ROUTES: Record<Route, React.ComponentType> = {
   produccion: Produccion,
   qr: EtiquetasQRPage,
   ocr: OcrPage,
+  facturas: Facturas,
   reportes: Reportes,
   usuarios: Usuarios,
   config: Configuracion,

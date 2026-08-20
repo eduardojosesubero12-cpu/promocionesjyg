@@ -12,22 +12,22 @@ import { sbClient, probarConexion, subirTodo, descargarTodo, rowsToDb } from "./
 
 export type Route =
   | "dashboard" | "clientes" | "escuelas" | "docentes" | "estudiantes" | "ventas" | "cotizaciones"
-  | "paquetes" | "mensajes" | "sesiones" | "agenda" | "produccion" | "qr" | "ocr"
+  | "paquetes" | "mensajes" | "sesiones" | "agenda" | "produccion" | "qr" | "ocr" | "facturas"
   | "reportes" | "usuarios" | "config" | "integraciones";
 
 export const ACCESS: Record<Rol, Route[]> = {
-  admin: ["dashboard", "clientes", "escuelas", "docentes", "estudiantes", "ventas", "cotizaciones", "paquetes", "mensajes", "sesiones", "agenda", "produccion", "qr", "ocr", "reportes", "usuarios", "config", "integraciones"],
-  operador: ["dashboard", "clientes", "escuelas", "docentes", "estudiantes", "ventas", "cotizaciones", "paquetes", "mensajes", "qr", "ocr"],
+  admin: ["dashboard", "clientes", "escuelas", "docentes", "estudiantes", "ventas", "cotizaciones", "paquetes", "mensajes", "sesiones", "agenda", "produccion", "qr", "ocr", "facturas", "reportes", "usuarios", "config", "integraciones"],
+  operador: ["dashboard", "clientes", "escuelas", "docentes", "estudiantes", "ventas", "cotizaciones", "paquetes", "mensajes", "qr", "ocr", "facturas"],
   produccion: ["dashboard", "paquetes", "produccion", "qr", "sesiones"],
-  cobranza: ["dashboard", "clientes", "estudiantes", "ventas", "reportes", "mensajes"],
+  cobranza: ["dashboard", "clientes", "estudiantes", "ventas", "reportes", "mensajes", "facturas"],
 };
 
 export const ROUTE_TITLE: Record<Route, string> = {
   dashboard: "Dashboard", clientes: "Clientes", escuelas: "Escuelas", docentes: "Profesores",
   estudiantes: "Estudiantes", ventas: "Ventas", cotizaciones: "Cotizaciones", paquetes: "Paquetes",
   mensajes: "Mensajes", sesiones: "Sesiones Fotográficas", agenda: "Agenda / Calendario",
-  produccion: "Producción", qr: "Tarjetas QR", ocr: "Escáner OCR", reportes: "Reportes",
-  usuarios: "Usuarios", config: "Configuración", integraciones: "Integraciones",
+  produccion: "Producción", qr: "Tarjetas QR", ocr: "Escáner OCR", facturas: "Facturación",
+  reportes: "Reportes", usuarios: "Usuarios", config: "Configuración", integraciones: "Integraciones",
 };
 
 interface DB {

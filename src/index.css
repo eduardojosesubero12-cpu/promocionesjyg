@@ -383,6 +383,44 @@ html.dark .toast { background: #e8eef7; color: #101828; }
   text-transform: uppercase; opacity: 0.66; font-weight: 600; background: rgba(0, 0, 0, 0.22);
 }
 
+/* ================= TICKET TÉRMICO (facturación) ================= */
+.ticket {
+  width: 300px; background: #fdfdf9; color: #20201c;
+  font-family: "Courier New", ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px; line-height: 1.5; padding: 16px 15px 10px;
+  position: relative; box-shadow: 0 20px 44px -16px rgba(15, 23, 42, 0.5);
+  transition: transform 0.25s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.ticket:hover { transform: translateY(-3px); }
+.ticket-tear {
+  height: 9px; background:
+    linear-gradient(-135deg, #fdfdf9 5px, transparent 0) 0 0,
+    linear-gradient(135deg, #fdfdf9 5px, transparent 0) 5px 0;
+  background-size: 10px 9px; background-repeat: repeat-x;
+  margin-top: -1px; filter: drop-shadow(0 6px 8px rgba(15, 23, 42, 0.25));
+}
+.t-center { text-align: center; }
+.t-bold { font-weight: 700; }
+.t-dashed { border: none; border-top: 1.5px dashed #b3b0a4; margin: 8px 0; }
+.t-line { display: flex; justify-content: space-between; gap: 8px; }
+.t-line .l { text-align: left; } .t-line .r { text-align: right; white-space: nowrap; }
+.t-muted { color: #6f6d63; }
+.t-sm { font-size: 9.5px; }
+.t-titulo { font-size: 13px; letter-spacing: 2px; font-weight: 700; }
+.t-section { letter-spacing: 1.5px; font-weight: 700; font-size: 10px; color: #4c4a42; }
+.t-stamp {
+  position: absolute; top: 42%; right: 6%; transform: rotate(-14deg);
+  font-family: var(--font-display); font-weight: 800; font-size: 22px; letter-spacing: 3px;
+  padding: 3px 12px; border: 3px double currentColor; border-radius: 6px;
+  opacity: 0.85; pointer-events: none; mix-blend-mode: multiply;
+}
+.t-stamp.pagado { color: #0aaa67; }
+.t-stamp.saldo { color: #e5342b; }
+.t-qr { display: flex; flex-direction: column; align-items: center; gap: 4px; margin: 6px 0 2px; }
+.t-qr > div { background: #fff; border: 1.5px solid #20201c; border-radius: 4px; padding: 6px; }
+.t-barcode { display: flex; align-items: stretch; height: 26px; gap: 1.5px; justify-content: center; margin: 4px 0 2px; }
+.t-barcode i { background: #20201c; width: 2px; display: block; }
+
 /* ================= IMPRESIÓN ================= */
 .print-sheet { display: none; }
 @media print {
@@ -392,6 +430,9 @@ html.dark .toast { background: #e8eef7; color: #101828; }
   .print-sheet { display: grid !important; grid-template-columns: repeat(2, 1fr); gap: 18px; position: absolute; inset: 0; padding: 20px; visibility: visible !important; }
   .print-sheet * { visibility: visible !important; }
   .print-sheet--tarj { display: flex !important; flex-wrap: wrap; align-content: flex-start; gap: 6mm; padding: 6mm; }
+  .print-sheet--ticket { display: block !important; padding: 0 !important; }
+  .print-sheet--ticket .ticket { margin: 0 auto; box-shadow: none; transform: none; width: 80mm; }
+  .print-sheet--ticket .ticket-tear { display: none; }
   .cred { box-shadow: none; break-inside: avoid; }
 
   .tarj-zoom { zoom: 1 !important; }
