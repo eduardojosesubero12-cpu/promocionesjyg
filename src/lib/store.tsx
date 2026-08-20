@@ -100,6 +100,8 @@ interface Ctx {
   saveUsuario: (u: Usuario) => void; deleteUsuario: (id: string) => void;
   setConfig: (patch: Partial<Config>) => void;
   exportBackup: () => string; importBackup: (json: string) => boolean;
+  syncInfo: { last: number; ok: boolean; msg: string } | null; syncing: boolean;
+  testCloud: (url: string) => Promise<boolean>; syncToCloud: (url?: string) => Promise<boolean>; restoreFromCloud: () => Promise<boolean>;
   alerts: { key: string; title: string; desc: string; route: Route }[];
 }
 
@@ -289,6 +291,62 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     } catch { return false; }
   }, []);
 
+  /* ---------- Base de datos en la nube (Google Sheets vía Apps Script) ---------- */
+  const [syncInfo, setSyncInfo] = useState<{ last: number; ok: boolean; msg: string } | null>(null);
+  const [syncing, setSyncing] = useState(false);
+
+  const testCloud = useCallback(async (url: string): Promise<boolean> => {
+    try {
+      const r = await fetch(`${url}?action=ping`);
+      const j = await r.json();
+      return !!j.ok;
+    } catch { return false; }
+  }, []);
+
+  const syncToCloud = useCallback(async (urlArg?: string): Promise<boolean> => {
+    const url = urlArg || dbRef.current.config.appsScriptUrl;
+    if (!url) { setSyncInfo({ last: Date.now(), ok: false, msg: "Falta la URL de la Aplicación web de Apps Script" }); return false; }
+    setSyncing(true);
+    try {
+      const r = await fetch(url, { method: "POST", body: JSON.stringify(dbRef.current) });
+      const j = await r.json();
+      const ok = !!j.ok;
+      setSyncInfo({ last: Date.now(), ok, msg: ok ? `Respaldo guardado en Google Sheets (fila ${j.fila ?? "—"})` : "El servidor respondió un error" });
+      return ok;
+    } catch {
+      setSyncInfo({ last: Date.now(), ok: false, msg: "No se pudo conectar con Apps Script (revisa la URL y el despliegue)" });
+      return false;
+    } finally { setSyncing(false); }
+  }, []);
+
+  const restoreFromCloud = useCallback(async (): Promise<boolean> => {
+    const url = dbRef.current.config.appsScriptUrl;
+    if (!url) { setSyncInfo({ last: Date.now(), ok: false, msg: "Falta la URL de la Aplicación web" }); return false; }
+    setSyncing(true);
+    try {
+      const r = await fetch(`${url}?action=cargar`);
+      const j = await r.json();
+      if (!j.ok || !j.datos) { setSyncInfo({ last: Date.now(), ok: false, msg: "La hoja no tiene respaldos todavía" }); return false; }
+      const d = typeof j.datos === "string" ? JSON.parse(j.datos) : j.datos;
+      if (!d || !Array.isArray(d.estudiantes) || !d.config) { setSyncInfo({ last: Date.now(), ok: false, msg: "El respaldo de la nube está dañado" }); return false; }
+      setDb({ ...seedDB(), ...d });
+      setSyncInfo({ last: Date.now(), ok: true, msg: "Base de datos restaurada desde Google Sheets" });
+      return true;
+    } catch {
+      setSyncInfo({ last: Date.now(), ok: false, msg: "Error al leer la nube" });
+      return false;
+    } finally { setSyncing(false); }
+  }, []);
+
+  /* Auto-sincronización: 2.5 s después de cada cambio, si está activada */
+  useEffect(() => {
+    if (!db.config.autoSync || !db.config.appsScriptUrl) return;
+    const t = setTimeout(() => { syncToCloud(); }, 2500);
+    return () => clearTimeout(t);
+  }, [db, db.config.autoSync, db.config.appsScriptUrl, syncToCloud]);
+
+
+
   const toggleDark = useCallback(() => setDark((v) => !v), []);
   useEffect(() => {
     document.documentElement.classList.toggle("dark", dark);
@@ -320,7 +378,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     addPago, deletePago, setPedidoEstado, saveCodigos,
     saveCotizacion, deleteCotizacion, convertirCotizacion,
     saveSesion, deleteSesion, saveEvento, deleteEvento, addMensaje,
-    saveUsuario, deleteUsuario, setConfig, exportBackup, importBackup, alerts,
+    saveUsuario, deleteUsuario, setConfig, exportBackup, importBackup,
+    syncInfo, syncing, testCloud, syncToCloud, restoreFromCloud, alerts,
   };
 
   return (

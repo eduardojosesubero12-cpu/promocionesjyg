@@ -37,6 +37,7 @@ export interface Config {
   preciosPaquetes: number[];
   metodos: { id: string; nombre: string; bs: boolean; activo: boolean }[];
   usarApi: boolean; usarTasaManual: boolean; tasaFallback: number; tasaManualUSD: number; tasaManualEUR: number; historialAuto: boolean;
+  appsScriptUrl: string; autoSync: boolean;
 }
 
 export interface OcrDraft { nombre: string; ci: string; fecha: string; raw: string; }
@@ -298,7 +299,37 @@ export const SEED_CONFIG: Config = {
     { id: "m5", nombre: "Trueque", bs: true, activo: true },
   ],
   usarApi: true, usarTasaManual: false, tasaFallback: 348.5, tasaManualUSD: 348.5, tasaManualEUR: 384.2, historialAuto: true,
+  appsScriptUrl: "", autoSync: false,
 };
+
+/* =============== Código de Apps Script (base de datos en Google Sheets) =============== */
+export const APPS_SCRIPT_CODE = `// Codigo.gs — pegarlo en Google Apps Script y desplegar como Aplicación web
+// Crea automáticamente la hoja "CRM_JyG" como base de datos
+function setup_() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sh = ss.getSheetByName("CRM_JyG");
+  if (!sh) { sh = ss.insertSheet("CRM_JyG"); sh.appendRow(["fecha", "datos"]); }
+  return sh;
+}
+function doGet(e) {
+  var sh = setup_();
+  var accion = (e.parameter.action || "cargar");
+  if (accion === "ping") {
+    return json_({ ok: true, mensaje: "CRM JyG conectado", hora: new Date().toISOString() });
+  }
+  var last = sh.getLastRow(); // devuelve el último respaldo guardado
+  var datos = last > 1 ? sh.getRange(last, 2).getValue() : "";
+  return json_({ ok: true, datos: datos });
+}
+function doPost(e) {
+  var sh = setup_();
+  sh.appendRow([new Date(), e.postData.contents]); // guarda cada sincronización
+  return json_({ ok: true, mensaje: "Datos guardados", fila: sh.getLastRow() });
+}
+function json_(obj) {
+  return ContentService.createTextOutput(JSON.stringify(obj))
+    .setMimeType(ContentService.MimeType.JSON);
+}`;
 
 /* Historial diario de tasas (últimos 15 días) */
 export const SEED_HISTORIAL: HistorialTasa[] = (() => {
