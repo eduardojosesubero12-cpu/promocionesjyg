@@ -51,7 +51,9 @@ function Sidebar() {
   const secciones = useMemo(() => NAV.map((s) => ({ ...s, items: s.items.filter((i) => can(i.id)) })).filter((s) => s.items.length > 0), [can]);
   return (
     <>
-      {mobileNav && <div className="fixed inset-0 z-[1900] lg:hidden" style={{ background: "rgba(10,17,30,.5)" }} onClick={() => setMobileNav(false)} />}
+      {mobileNav && (
+        <div className="fixed inset-0 only-mobile" style={{ zIndex: 1900, background: "rgba(10,17,30,.55)", backdropFilter: "blur(2px)" }} onClick={() => setMobileNav(false)} />
+      )}
       <aside id="sidebar" className={mobileNav ? "show" : ""}>
         <div className="sidebar-logo">
           <span className="mark"><GraduationCap size={23} /></span>
@@ -59,7 +61,7 @@ function Sidebar() {
             <b>Promociones JyG</b>
             <small>CRM de Grados</small>
           </div>
-          <button className="icon-btn lg:hidden" onClick={() => setMobileNav(false)}><X size={16} /></button>
+          <button className="icon-btn only-mobile" onClick={() => setMobileNav(false)} aria-label="Cerrar menú"><X size={16} /></button>
         </div>
         <nav className="flex-1 pb-2">
           {secciones.map((s) => (
@@ -184,7 +186,7 @@ function UserMenu() {
 }
 
 export default function Shell({ children }: { children: React.ReactNode }) {
-  const { route, setRoute, setMobileNav, dark, toggleDark, setOcrOpen, can, tasa, refreshTasa } = useApp();
+  const { route, setRoute, mobileNav, setMobileNav, dark, toggleDark, setOcrOpen, can, tasa, refreshTasa } = useApp();
   const permitido = can(route);
   const section = NAV.find((s) => s.items.some((i) => i.id === route))?.section || "";
   return (
@@ -192,7 +194,9 @@ export default function Shell({ children }: { children: React.ReactNode }) {
       <Sidebar />
       <div id="content">
         <header id="topbar">
-          <button className="icon-btn lg:hidden" onClick={() => setMobileNav(true)} aria-label="Abrir menú"><Menu size={18} /></button>
+          <button className="icon-btn only-mobile" onClick={() => setMobileNav(!mobileNav)} aria-label="Abrir menú" style={mobileNav ? { background: "var(--blue)", color: "#fff", borderColor: "var(--blue)" } : undefined}>
+            {mobileNav ? <X size={18} /> : <Menu size={18} />}
+          </button>
           <span className="font-display font-semibold text-[13px] hidden sm:block" style={{ color: "var(--ink-soft)" }}>{section} · <b style={{ color: "var(--blue)" }}>{ROUTE_TITLE[route]}</b></span>
           <div className="flex-1" />
           <Reloj />

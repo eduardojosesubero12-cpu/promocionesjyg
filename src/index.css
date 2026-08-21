@@ -244,6 +244,12 @@ html.dark .ticket-capture { background: radial-gradient(130% 150% at 18% 0%, #26
 .cred-data b { font-family: var(--font-display); font-size: 14.5px; display: block; }
 .cred-foot { display: flex; justify-content: space-between; padding: 10px 16px; border-top: 1px dashed var(--border); font-size: 11px; color: #5a6478; }
 
+/* Elementos visibles solo en pantallas donde el sidebar se oculta (≤1080px) */
+.only-mobile { display: none !important; }
+@media screen and (max-width: 1080px) {
+  .only-mobile { display: inline-flex !important; }
+}
+
 /* RESPONSIVE */
 @media screen and (max-width: 1080px) {
   #sidebar { transform: translateX(-105%); width: 276px; box-shadow: var(--shadow-lg); }
