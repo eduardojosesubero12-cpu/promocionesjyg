@@ -1,16 +1,12 @@
-import type { SupabaseClient } from "@supabase/supabase-js";
+import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import type { CRMData, AdicionalItem, Cotizacion, Estudiante, Pago } from "./data";
 import { DB_TABLES } from "./data";
 
-/* ---------- Cliente (import dinámico para no inflar el bundle inicial) ---------- */
-export const sbClient = async (url: string, key: string): Promise<SupabaseClient> => {
-  const { createClient } = await import("@supabase/supabase-js");
-  return createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
-};
+export const sbClient = (url: string, key: string): SupabaseClient =>
+  createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
 
 const codigosVacios = () => ({ carnetAlumno: "", carnetRep: "", firmaLibro: "", togaBirrete: "", fotoLibre: "", fotoAdicional: "" });
 
-/* ---------- CRM → filas (camelCase → snake_case) ---------- */
 export function dbToRows(db: CRMData): Record<string, any[]> {
   return {
     escuelas: db.escuelas.map((e) => ({
@@ -56,17 +52,15 @@ export function dbToRows(db: CRMData): Record<string, any[]> {
       id: h.id, fecha: h.fecha, usd: h.usd, euro: h.euro, paralelo: h.paralelo, fuente: h.fuente, actualizado: h.actualizado,
     })),
     paquetes_escuelas: db.paquetesEscuelas.map((p) => ({
-      id: p.id, escuela_id: p.escuelaId || null, nombre: p.nombre, tipo_paquete_id: p.tipoPaqueteId,
+      id: p.id, escuela_id: p.escuelaId, nombre: p.nombre, tipo_paquete_id: p.tipoPaqueteId,
       precio: p.precio, articulos: p.articulos, nota: p.nota, activo: p.activo, creado: p.creado,
     })),
     configuracion: [{
-      id: "jyg", data: db.config, seq_pedido: db.seqPedido, seq_cot: db.seqCot,
-      current_user_id: db.currentUserId,
+      id: "jyg", data: db.config, seq_pedido: db.seqPedido, seq_cot: db.seqCot, current_user_id: db.currentUserId,
     }],
   };
 }
 
-/* ---------- Filas → CRM ---------- */
 export function rowsToDb(rows: Record<string, any[]>, base: CRMData): CRMData {
   const estudiantes: Estudiante[] = (rows.estudiantes || []).map((r) => {
     const pagos: Pago[] = (rows.pagos || []).filter((p) => p.estudiante_id === r.id).map((p) => ({
@@ -85,7 +79,6 @@ export function rowsToDb(rows: Record<string, any[]>, base: CRMData): CRMData {
       observaciones: r.observaciones || "", codigos: { ...codigosVacios(), ...(r.codigos || {}) },
     };
   });
-
   const cotizaciones: Cotizacion[] = (rows.cotizaciones || []).map((c) => ({
     id: c.id, numero: c.numero, fecha: c.fecha || "", cliente: c.cliente || "", telefono: c.telefono || "",
     escuela: c.escuela || "", paqueteId: c.paquete_id || "premium", estado: c.estado || "Pendiente", nota: c.nota || "",
@@ -93,7 +86,6 @@ export function rowsToDb(rows: Record<string, any[]>, base: CRMData): CRMData {
       producto: i.producto, cantidad: Number(i.cantidad), precio: Number(i.precio), talla: i.talla || "",
     })),
   }));
-
   const cfg = (rows.configuracion || [])[0];
   return {
     escuelas: (rows.escuelas || []).map((e) => ({
@@ -121,8 +113,7 @@ export function rowsToDb(rows: Record<string, any[]>, base: CRMData): CRMData {
     })),
     paquetesEscuelas: (rows.paquetes_escuelas || []).map((p) => ({
       id: p.id, escuelaId: p.escuela_id || "", nombre: p.nombre, tipoPaqueteId: p.tipo_paquete_id || "personalizado",
-      precio: Number(p.precio) || 0, articulos: p.articulos || [], nota: p.nota || "",
-      activo: !!p.activo, creado: p.creado || "",
+      precio: Number(p.precio) || 0, articulos: p.articulos || [], nota: p.nota || "", activo: !!p.activo, creado: p.creado || "",
     })),
     config: cfg?.data ? { ...base.config, ...cfg.data } : base.config,
     currentUserId: cfg?.current_user_id || base.currentUserId,
@@ -131,7 +122,6 @@ export function rowsToDb(rows: Record<string, any[]>, base: CRMData): CRMData {
   };
 }
 
-/* ---------- Prueba de conexión + conteo de tablas ---------- */
 export async function probarConexion(client: SupabaseClient): Promise<{ tablas: number; filas: number }> {
   let tablas = 0, filas = 0;
   for (const { tabla } of DB_TABLES) {
@@ -143,19 +133,16 @@ export async function probarConexion(client: SupabaseClient): Promise<{ tablas: 
   return { tablas, filas };
 }
 
-/* ---------- Subir todo (la nube queda idéntica al CRM) ---------- */
 export async function subirTodo(
   client: SupabaseClient,
   db: CRMData,
   onTabla?: (tabla: string, estado: "busy" | "ok" | "err", filas?: number) => void
 ): Promise<void> {
   const rows = dbToRows(db);
-  // Orden con dependencias: padres primero
   const orden = ["escuelas", "docentes", "estudiantes", "pagos", "adicionales_items", "cotizaciones", "cotizacion_items", "sesiones", "eventos", "mensajes", "usuarios", "historial_tasas", "paquetes_escuelas", "configuracion"];
   for (const tabla of orden) {
     onTabla?.(tabla, "busy");
     try {
-      // Vaciar la tabla y reinsertar: espejo exacto del CRM
       const del = await client.from(tabla).delete().neq("id", "");
       if (del.error) throw new Error(del.error.message);
       const data = rows[tabla] || [];
@@ -171,7 +158,6 @@ export async function subirTodo(
   }
 }
 
-/* ---------- Descargar todo (el CRM queda idéntico a la nube) ---------- */
 export async function descargarTodo(client: SupabaseClient): Promise<Record<string, any[]>> {
   const rows: Record<string, any[]> = {};
   for (const { tabla } of DB_TABLES) {

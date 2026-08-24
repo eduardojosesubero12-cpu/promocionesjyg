@@ -1,182 +1,166 @@
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useRef, useState } from "react";
 import QRCode from "react-qr-code";
-import { Printer, Search, Ticket as TicketIcon, School, Users } from "lucide-react";
+import { toJpeg } from "html-to-image";
+import { Check, Download, Printer, Smartphone } from "lucide-react";
 import { useApp } from "../lib/store";
-import type { Estudiante, Pago } from "../lib/data";
-import { PAQUETES, estudianteTotales, fmtBs, fmtUSD, fmtFecha, todayISO } from "../lib/data";
-import { EmptyState, Badge } from "../components/ui";
+import type { Estudiante } from "../lib/data";
+import { PAQUETES, estudianteTotales, fmtBs, fmtFecha, fmtUSD, todayISO, waLink } from "../lib/data";
+import { EmptyState, useNow } from "../components/ui";
 
-/* ---------- Código de barras decorativo (a partir del pedido) ---------- */
-function Barcode({ seed }: { seed: string }) {
-  const bars = useMemo(() => {
-    const out: number[] = [];
-    for (const ch of (seed + seed).slice(0, 28)) {
-      out.push(((ch.charCodeAt(0) % 3) + 1));
-      out.push(1);
-    }
-    return out;
-  }, [seed]);
-  return (
-    <div className="t-barcode" aria-hidden="true">
-      {bars.map((w, i) => <i key={i} style={{ width: w }} />)}
-    </div>
-  );
-}
+const qrPayload = (e: Estudiante, escuela: string) => {
+  const t = estudianteTotales(e);
+  return ["JYG", e.pedido, e.nombre, e.ci || "S/C", escuela, `${e.grado} "${e.seccion}"`,
+    `Paq.${PAQUETES[e.paqueteId].nombre}`, `Total ${fmtUSD(t.total)}`, `Abonado ${fmtUSD(t.abonado)}`, `Saldo ${fmtUSD(t.saldo)}`].join("|");
+};
 
-/* ---------- Línea de un abono: divisa ⇄ bolívares ---------- */
-function PagoRow({ p, tasaHoy }: { p: Pago; tasaHoy: number }) {
-  const esBs = p.bs;
-  const montoBs = esBs ? p.monto : p.usd * (p.tasa || tasaHoy);
-  const montoUsd = esBs ? (p.tasa ? p.monto / p.tasa : p.usd) : p.monto;
-  const tasa = p.tasa || tasaHoy;
+function PagoRow({ fecha, metodo, refp, usd, tasaDia }: { fecha: string; metodo: string; refp: string; usd: number; tasaDia: number }) {
   return (
-    <div style={{ marginBottom: 7 }}>
+    <div>
       <div className="t-line">
-        <span className="l">{p.fecha} · {p.metodo}</span>
-        <span className="r t-bold">{fmtUSD(montoUsd)}</span>
+        <span className="l">{fmtFecha(fecha)} · {metodo}</span>
+        <span className="r t-bold">{fmtUSD(usd)}</span>
       </div>
-      {p.referencia && (
-        <div className="t-sm t-muted">Ref: {p.referencia}</div>
-      )}
-      <div className="t-sm t-muted">
-        {esBs ? <>Bs. {montoBs.toLocaleString("es-VE", { maximumFractionDigits: 2 })} → divisa</> : <>→ Bs. {montoBs.toLocaleString("es-VE", { maximumFractionDigits: 2 })}</>}
-        {" "}· tasa {tasa.toLocaleString("es-VE", { maximumFractionDigits: 2 })}
+      <div className="t-line t-muted t-sm">
+        <span className="l">Ref: {refp || "—"} · tasa {fmtBs(tasaDia)}</span>
+        <span className="r">{fmtBs(usd * tasaDia)}</span>
       </div>
     </div>
   );
 }
 
-/* ---------- Ticket térmico ---------- */
-export function Ticket({ est, escuelaNombre, docenteNombre, tasaHoy, now }: {
-  est: Estudiante; escuelaNombre: string; docenteNombre: string; tasaHoy: number; now: number;
-}) {
+function Ticket({ est, escuelaNombre, tasaHoy }: { est: Estudiante; escuelaNombre: string; tasaHoy: number }) {
+  const { db } = useApp();
   const t = estudianteTotales(est);
   const pagado = t.saldo <= 0.009;
-  const emision = new Date(now);
-  const hora = emision.toLocaleTimeString("es-VE", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
-  const empresa = useApp().db.config.empresa;
-  const folio = `${est.pedido}-${todayISO().split("-").join("")}`;
-
-  const qrPayload = [
-    "JYG", est.pedido, est.nombre, est.ci || "S/C", escuelaNombre, `${est.grado} "${est.seccion}"`,
-    `Paq.${PAQUETES[est.paqueteId].nombre}`, `Total ${fmtUSD(t.total)}`, `Abonado ${fmtUSD(t.abonado)}`,
-    `Saldo ${fmtUSD(t.saldo)}`, `Abonos ${t.partes}`,
-  ].join("|");
+  const now = useNow(1000);
+  const barcode = useMemo(() => Array.from({ length: 28 }, (_, i) => (est.pedido.charCodeAt(i % est.pedido.length) + i * 7) % 3 + 1), [est.pedido]);
 
   return (
     <div>
       <div className="ticket">
-        {/* sello */}
-        <span className={`t-stamp ${pagado ? "pagado" : "saldo"}`}>{pagado ? "PAGADO" : "SALDO"}</span>
-
-        {/* encabezado empresa */}
+        <div className={pagado ? "t-stamp pagado" : "t-stamp saldo"}>{pagado ? "PAGADO" : "SALDO"}</div>
         <div className="t-center">
-          <div className="t-titulo">{empresa.nombre}</div>
-          <div className="t-sm">RIF: {empresa.rif}</div>
-          <div className="t-sm t-muted">{empresa.direccion}</div>
-          <div className="t-sm t-muted">Tel: {empresa.telefono}</div>
+          <div className="t-bold" style={{ fontSize: 14 }}>{db.config.empresa.nombre}</div>
+          <div className="t-muted t-sm">RIF: {db.config.empresa.rif}</div>
+          <div className="t-muted t-sm">{db.config.empresa.direccion}</div>
+          <div className="t-muted t-sm">Tel: {db.config.empresa.telefono}</div>
         </div>
-
+        <hr className="t-dashed" />
+        <div className="t-center t-titulo">TICKET DE PAGO</div>
+        <div className="t-center t-sm t-muted">Folio {est.pedido}-{todayISO().replace(/-/g, "")} · {fmtFecha(todayISO())}</div>
         <hr className="t-dashed" />
 
-        <div className="t-center">
-          <div className="t-section">TICKET DE PAGO</div>
-          <div className="t-sm">N° {folio}</div>
-          <div className="t-sm t-muted">{fmtFecha(todayISO())} · {hora}</div>
-        </div>
-
+        <div className="t-line"><span className="l t-muted">Estudiante</span><span className="r t-bold">{est.nombre}</span></div>
+        <div className="t-line"><span className="l t-muted">C.I.</span><span className="r">{est.ci || "S/C"}</span></div>
+        <div className="t-line"><span className="l t-muted">Escuela</span><span className="r">{escuelaNombre || "—"}</span></div>
+        <div className="t-line"><span className="l t-muted">Grado / Sección</span><span className="r">{est.grado} “{est.seccion}”</span></div>
+        <div className="t-line"><span className="l t-muted">Representante</span><span className="r">{est.representante || "—"}</span></div>
         <hr className="t-dashed" />
 
-        {/* estudiante */}
-        <div className="t-section">ESTUDIANTE</div>
-        <div className="t-line"><span className="l">Nombre:</span><span className="r t-bold">{est.nombre}</span></div>
-        <div className="t-line"><span className="l">C.I.:</span><span className="r">{est.ci || "—"}</span></div>
-        <div className="t-line"><span className="l">Pedido:</span><span className="r">{est.pedido}</span></div>
-        <div className="t-line"><span className="l">Escuela:</span><span className="r">{escuelaNombre || "—"}</span></div>
-        <div className="t-line"><span className="l">Profesor:</span><span className="r">{docenteNombre || "—"}</span></div>
-        <div className="t-line"><span className="l">Grado:</span><span className="r">{est.grado} "{est.seccion}"</span></div>
-        <div className="t-line"><span className="l">Registro:</span><span className="r">{fmtFecha(est.fechaRegistro)}</span></div>
-
-        <hr className="t-dashed" />
-
-        {/* detalle del pedido */}
         <div className="t-section">DETALLE DEL PEDIDO</div>
-        <div className="t-line">
-          <span className="l">Paquete {PAQUETES[est.paqueteId].nombre}</span>
-          <span className="r t-bold">{fmtUSD(est.precioPaquete)}</span>
-        </div>
+        <div className="t-line"><span className="l">Paquete {PAQUETES[est.paqueteId].nombre}</span><span className="r t-bold">{fmtUSD(est.precioPaquete)}</span></div>
         {est.adicionales.map((a, i) => (
-          <div className="t-line t-sm" key={i}>
-            <span className="l">+ {a.cantidad}× {a.producto}{a.talla ? ` (${a.talla})` : ""}</span>
-            <span className="r">{fmtUSD(a.cantidad * a.precio)}</span>
-          </div>
+          <div key={i} className="t-line"><span className="l">{a.cantidad}× {a.producto}{a.talla ? ` (${a.talla})` : ""}</span><span className="r">{fmtUSD(a.cantidad * a.precio)}</span></div>
         ))}
-
+        <div className="t-line t-bold"><span className="l">TOTAL</span><span className="r">{fmtUSD(t.total)}</span></div>
+        <div className="t-line t-muted t-sm"><span className="l">Equiv. en Bs (tasa {fmtBs(tasaHoy)})</span><span className="r">{fmtBs(t.total * tasaHoy)}</span></div>
         <hr className="t-dashed" />
 
-        {/* abonos */}
-        <div className="t-section">ABONOS RECIBIDOS ({t.partes})</div>
-        {est.pagos.length === 0 && <div className="t-sm t-muted">Sin abonos registrados.</div>}
-        {est.pagos.map((p) => <PagoRow key={p.id} p={p} tasaHoy={tasaHoy} />)}
-
-        <hr className="t-dashed" />
-
-        {/* totales */}
-        <div className="t-line t-bold"><span className="l">TOTAL PAQUETE</span><span className="r">{fmtUSD(t.total)}</span></div>
-        <div className="t-sm t-muted t-line"><span className="l"> </span><span className="r">≈ {fmtBs(t.total * tasaHoy)}</span></div>
+        <div className="t-section">ABONOS ({est.pagos.length})</div>
+        {est.pagos.length === 0 ? (
+          <div className="t-muted t-sm">Sin abonos registrados</div>
+        ) : (
+          est.pagos.map((p) => <PagoRow key={p.id} fecha={p.fecha} metodo={p.metodo} refp={p.referencia} usd={p.usd} tasaDia={p.tasa} />)
+        )}
         <div className="t-line t-bold"><span className="l">ABONADO</span><span className="r">{fmtUSD(t.abonado)}</span></div>
-        <div className="t-line t-bold" style={{ fontSize: 12.5 }}>
-          <span className="l">SALDO PENDIENTE</span>
-          <span className="r" style={{ color: pagado ? "#0aaa67" : "#e5342b" }}>{fmtUSD(t.saldo)}</span>
+        <div className="t-line t-bold" style={{ color: pagado ? "var(--ok)" : "var(--danger)" }}>
+          <span className="l">{pagado ? "PAGADO COMPLETO" : "SALDO PENDIENTE"}</span><span className="r">{fmtUSD(t.saldo)}</span>
         </div>
-        <div className="t-sm t-muted t-line"><span className="l"> </span><span className="r">≈ {fmtBs(t.saldo * tasaHoy)}</span></div>
-
+        <div className="t-line t-muted t-sm"><span className="l">Saldo en Bs</span><span className="r">{fmtBs(t.saldo * tasaHoy)}</span></div>
         <hr className="t-dashed" />
 
-        {/* QR del estudiante */}
         <div className="t-qr">
-          <div><QRCode value={qrPayload} size={86} level="M" /></div>
-          <span className="t-sm t-muted">Escanea para ver el expediente</span>
+          <div><QRCode value={qrPayload(est, escuelaNombre)} size={90} level="M" /></div>
+          <span className="t-sm t-muted">Escanea para verificar</span>
         </div>
-
+        <div className="t-barcode">{barcode.map((w, i) => <i key={i} style={{ width: w }} />)}</div>
+        <div className="t-center t-sm t-muted">{est.pedido}</div>
         <hr className="t-dashed" />
-
-        <Barcode seed={est.pedido} />
-        <div className="t-center t-sm">{est.pedido}</div>
-        <div className="t-center t-bold" style={{ marginTop: 6 }}>¡GRACIAS POR SU COMPRA!</div>
-        <div className="t-center t-sm t-muted">{empresa.nombre}</div>
-        <div className="t-center t-sm t-muted">Tasa del día: {fmtBs(tasaHoy)} / $1</div>
+        <div className="t-center t-sm">¡Gracias por su compra! 🎓</div>
+        <div className="t-center t-sm t-muted">Tasa del día {fmtBs(tasaHoy)} · emitido {new Date(now).toLocaleTimeString("es-VE", { hour: "2-digit", minute: "2-digit" })}</div>
       </div>
       <div className="ticket-tear" />
     </div>
   );
 }
 
-/* ---------- Página de Facturación ---------- */
 export default function Facturas() {
-  const { db, tasa, param, setParam } = useApp();
-  const [q, setQ] = useState("");
-  const [fEscuela, setFEscuela] = useState("");
+  const { db, tasa, param, setParam, addMensaje, toast, success } = useApp();
+  const [selId, setSelId] = useState<string | null>(param?.est || db.estudiantes[0]?.id || null);
+  const [capturando, setCapturando] = useState(false);
   const [printEst, setPrintEst] = useState<Estudiante | null>(null);
-  const [now, setNow] = useState(Date.now());
+  const [enviados, setEnviados] = useState<Record<string, number>>({});
+  const ticketRef = useRef<HTMLDivElement>(null);
 
-  // reloj vivo para la hora de emisión
-  React.useEffect(() => {
-    const iv = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(iv);
-  }, []);
-
-  const lista = useMemo(() => {
-    const t = q.trim().toLowerCase();
-    return db.estudiantes
-      .filter((e) => (!t || [e.nombre, e.ci, e.pedido].some((v) => v.toLowerCase().includes(t))) && (!fEscuela || e.escuelaId === fEscuela))
-      .sort((a, b) => a.nombre.localeCompare(b.nombre));
-  }, [db.estudiantes, q, fEscuela]);
-
+  const sel = db.estudiantes.find((e) => e.id === selId) || null;
   const escuelaDe = (id: string) => db.escuelas.find((e) => e.id === id);
-  const docenteDe = (id: string) => db.docentes.find((d) => d.id === id);
 
-  const sel: Estudiante | null = db.estudiantes.find((e) => e.id === param?.est) || null;
+  const capturar = async (): Promise<Blob | null> => {
+    const node = ticketRef.current;
+    if (!node) { toast("Selecciona un estudiante primero", "warn"); return null; }
+    try {
+      const rect = node.getBoundingClientRect();
+      const dataUrl = await toJpeg(node, {
+        quality: 0.95, pixelRatio: 3, cacheBust: true, skipFonts: true,
+        backgroundColor: getComputedStyle(node).backgroundColor || "#e6e1d6",
+        width: rect.width, height: rect.height,
+        canvasWidth: Math.round(rect.width * 3), canvasHeight: Math.round(rect.height * 3),
+      });
+      const res = await fetch(dataUrl);
+      return await res.blob();
+    } catch {
+      toast("No se pudo capturar el ticket", "err");
+      return null;
+    }
+  };
+  const descargarBlob = (blob: Blob, nombre: string) => {
+    const u = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = u; a.download = nombre; a.click();
+    setTimeout(() => URL.revokeObjectURL(u), 4000);
+  };
+  const descargarImagen = async () => {
+    if (!sel) return;
+    setCapturando(true);
+    const blob = await capturar();
+    setCapturando(false);
+    if (!blob) return;
+    descargarBlob(blob, `ticket-${sel.pedido}-${todayISO()}.jpg`);
+    toast("Captura descargada como JPG", "ok");
+  };
+  const enviarImagen = async (e?: Estudiante) => {
+    const est = e || sel;
+    if (!est) return;
+    if (!est.telefono) { toast("Ese estudiante no tiene teléfono registrado", "err"); return; }
+    setCapturando(true);
+    const blob = await capturar();
+    setCapturando(false);
+    if (!blob) return;
+    const nombre = `ticket-${est.pedido}-${todayISO()}.jpg`;
+    const file = new File([blob], nombre, { type: "image/jpeg" });
+    const nav = navigator as Navigator & { canShare?: (d: { files: File[] }) => boolean; share?: (d: any) => Promise<void> };
+    const t = estudianteTotales(est);
+    if (nav.canShare && nav.canShare({ files: [file] })) {
+      try { await nav.share!({ files: [file], title: `Ticket ${est.pedido}`, text: `🧾 Ticket de pago — ${est.nombre}` }); } catch { return; }
+    } else {
+      descargarBlob(blob, nombre);
+      window.open(waLink(est.telefono, `🧾 ¡Hola${est.representante ? " " + est.representante : ""}! Adjunto la captura del ticket de pago de ${est.nombre} (${est.pedido}).`), "_blank");
+      toast("Captura descargada — adjúntala en el chat de WhatsApp que se abrió", "ok");
+    }
+    addMensaje({ id: Math.random().toString(36).slice(2, 10), fecha: todayISO(), destinatario: est.representante || est.nombre, telefono: est.telefono, plantilla: "Ticket de pago — captura (Facturación)", texto: `📷 Captura del ticket ${est.pedido} — ${est.nombre}. Total ${fmtUSD(t.total)} · Abonado ${fmtUSD(t.abonado)} · Saldo ${fmtUSD(t.saldo)} (imagen adjunta).` });
+    setEnviados((v) => ({ ...v, [est.id]: Date.now() }));
+    success("Captura enviada");
+  };
 
   const imprimir = () => {
     if (!sel) return;
@@ -192,83 +176,71 @@ export default function Facturas() {
           <div className="crumb">Operaciones</div>
           <h1>Facturación</h1>
           <p style={{ fontSize: 13.5, margin: "4px 0 0", color: "var(--ink-soft)" }}>
-            Ticket de pago estilo impresora térmica · datos de la empresa, abonos divisa ⇄ bolívares y QR del estudiante
+            Ticket de pago estilo impresora térmica · descarga la captura <b>completa en JPG</b> o envíala directo por WhatsApp
           </p>
         </div>
-        <button className="btn btn-primary" onClick={imprimir} disabled={!sel}>
-          <Printer size={15} /> Imprimir ticket
-        </button>
+        <div className="d-flex gap-2 flex-wrap">
+          <button className="btn btn-ghost" onClick={descargarImagen} disabled={!sel || capturando}><Download size={15} /> Descargar JPG</button>
+          <button className="btn btn-primary" style={{ background: "linear-gradient(150deg,#25d366,#128c4b)", boxShadow: "0 8px 20px -8px rgba(37,211,102,0.55)" }} onClick={() => enviarImagen()} disabled={!sel || capturando}>
+            <Smartphone size={15} /> {capturando ? "Capturando…" : "Enviar captura por WhatsApp"}
+          </button>
+        </div>
       </div>
 
-      <div className="grid grid-cols-1 xl:grid-cols-[360px_1fr] gap-5">
-        {/* Selector de estudiante */}
-        <div className="card p-4 h-fit">
-          <div className="flex items-center gap-2 h-[38px] px-3 rounded-full mb-3" style={{ background: "var(--surface-2)", border: "1.5px solid var(--border)" }}>
-            <Search size={15} style={{ color: "var(--ink-faint)" }} />
-            <input className="bg-transparent border-none outline-none w-full text-[13.5px]" style={{ color: "var(--ink)" }} placeholder="Buscar estudiante, pedido…" value={q} onChange={(e) => setQ(e.target.value)} />
-          </div>
-          <select className="select mb-3" value={fEscuela} onChange={(e) => setFEscuela(e.target.value)}>
-            <option value="">Todas las escuelas</option>
-            {db.escuelas.map((e) => <option key={e.id} value={e.id}>{e.nombre}</option>)}
-          </select>
-
-          <div className="flex flex-col gap-2 max-h-[560px] overflow-y-auto pr-1">
-            {lista.map((e) => {
-              const t = estudianteTotales(e);
-              const activo = sel?.id === e.id;
-              return (
-                <button key={e.id} onClick={() => setParam({ est: e.id })}
-                  className="flex items-center gap-3 p-3 rounded-xl border-none cursor-pointer text-left transition-all hover:translate-x-1"
-                  style={{ background: activo ? "var(--blue-tint-2)" : "var(--surface-2)", outline: activo ? "1.5px solid var(--blue)" : "1.5px solid transparent", color: "var(--ink)" }}>
-                  <span className="w-9 h-9 rounded-xl flex items-center justify-center font-display font-bold text-[12px] flex-shrink-0" style={{ background: activo ? "var(--blue)" : "var(--border)", color: activo ? "#fff" : "var(--ink-soft)" }}>
-                    {e.nombre[0]}
-                  </span>
-                  <span className="flex-1 min-w-0">
-                    <span className="block font-display font-semibold text-[13px] truncate">{e.nombre}</span>
-                    <span className="block text-[11px]" style={{ color: "var(--ink-faint)" }}>{e.pedido} · {escuelaDe(e.escuelaId)?.nombre || "—"}</span>
-                  </span>
-                  <Badge tone={t.saldo > 0 ? "red" : "green"} dot>{t.saldo > 0 ? fmtUSD(t.saldo) : "Pagado"}</Badge>
-                </button>
-              );
-            })}
-            {lista.length === 0 && <EmptyState icon={TicketIcon} title="Sin resultados" text="Ajusta la búsqueda para encontrar estudiantes." />}
+      <div className="row g-4">
+        <div className="col-12 col-lg-5">
+          <div className="card p-4">
+            <div className="font-display fw-semibold mb-2" style={{ fontSize: 14 }}>Selecciona el estudiante</div>
+            <select className="select mb-2" value={selId || ""} onChange={(e) => { setSelId(e.target.value); setParam({ est: e.target.value }); }}>
+              {db.estudiantes.map((e) => <option key={e.id} value={e.id}>{e.nombre} — {e.pedido}</option>)}
+            </select>
+            <div className="d-flex flex-column gap-1" style={{ maxHeight: 420, overflowY: "auto" }}>
+              {db.estudiantes.map((e) => {
+                const t = estudianteTotales(e);
+                const activo = e.id === selId;
+                return (
+                  <button key={e.id} onClick={() => { setSelId(e.id); setParam({ est: e.id }); }} className="d-flex align-items-center gap-2 p-2 rounded-3 border-0 text-start w-100" style={{ background: activo ? "var(--tint-navy-2)" : "var(--card-bg-2)", outline: activo ? "1.5px solid var(--jyg-navy)" : "1.5px solid transparent", color: "var(--ink)", cursor: "pointer" }}>
+                    <span className="d-flex align-items-center justify-content-center rounded-3 font-display fw-bold flex-shrink-0" style={{ width: 36, height: 36, fontSize: 12, background: "var(--tint-navy)", color: "var(--jyg-navy)" }}>{e.nombre[0]}</span>
+                    <span className="flex-grow-1" style={{ minWidth: 0 }}>
+                      <span className="d-block font-display fw-semibold text-truncate" style={{ fontSize: 13 }}>{e.nombre}</span>
+                      <span className="d-block" style={{ fontSize: 11, color: "var(--ink-faint)" }}>{e.pedido} · {escuelaDe(e.escuelaId)?.nombre || "—"}</span>
+                    </span>
+                    <span className="font-display fw-bold tabular-nums" style={{ fontSize: 12.5, color: t.saldo > 0 ? "var(--danger)" : "var(--ok)" }}>{fmtUSD(t.saldo)}</span>
+                  </button>
+                );
+              })}
+            </div>
           </div>
         </div>
 
-        {/* Vista previa del ticket */}
-        <div className="flex flex-col items-center gap-4">
+        <div className="col-12 col-lg-7">
           {sel ? (
-            <div className="reveal" key={sel.id}>
-              <Ticket
-                est={sel}
-                escuelaNombre={escuelaDe(sel.escuelaId)?.nombre || ""}
-                docenteNombre={docenteDe(sel.docenteId)?.nombre || ""}
-                tasaHoy={tasa.usd}
-                now={now}
-              />
-              <div className="flex items-center justify-center gap-2 text-[11.5px] mt-3" style={{ color: "var(--ink-faint)" }}>
-                <School size={13} /> {escuelaDe(sel.escuelaId)?.nombre || "Escuela sin asignar"}
-                <span>·</span>
-                <Users size={13} /> {docenteDe(sel.docenteId)?.nombre || "Profesor sin asignar"}
+            <div className="card p-4">
+              <div ref={ticketRef} className={`ticket-capture ${capturando ? "capturando" : ""}`}>
+                <Ticket est={sel} escuelaNombre={escuelaDe(sel.escuelaId)?.nombre || ""} tasaHoy={tasa.usd} />
+              </div>
+              <div className="d-flex justify-content-center gap-2 mt-3 flex-wrap">
+                <button className="btn btn-soft btn-sm" onClick={imprimir}><Printer size={14} /> Imprimir ticket</button>
+                {sel.telefono && (
+                  <button className="btn btn-sm" style={{ background: "var(--tint-ok)", color: "#128c4b", border: "1.5px solid rgba(37,211,102,0.4)" }} onClick={() => enviarImagen(sel)}>
+                    <Smartphone size={14} /> Enviar al {sel.representante ? "representante" : "estudiante"} · {sel.telefono}
+                  </button>
+                )}
+                {enviados[sel.id] && (
+                  <span className="d-flex align-items-center gap-1 font-display fw-semibold" style={{ fontSize: 11.5, color: "var(--ok)" }}>
+                    <Check size={14} /> Enviado a las {new Date(enviados[sel.id]).toLocaleTimeString("es-VE", { hour: "2-digit", minute: "2-digit" })}
+                  </span>
+                )}
               </div>
             </div>
           ) : (
-            <div className="card w-full"><EmptyState icon={TicketIcon} title="Selecciona un estudiante" text="Elige un estudiante de la lista para generar su ticket de pago." /></div>
+            <div className="card"><EmptyState icon={Printer} title="Sin estudiantes" text="Registra estudiantes para generar sus tickets de pago." /></div>
           )}
         </div>
       </div>
 
-      {/* Hoja de impresión */}
       <div className="print-sheet print-sheet--ticket">
-        {printEst && (
-          <Ticket
-            est={printEst}
-            escuelaNombre={escuelaDe(printEst.escuelaId)?.nombre || ""}
-            docenteNombre={docenteDe(printEst.docenteId)?.nombre || ""}
-            tasaHoy={tasa.usd}
-            now={now}
-          />
-        )}
+        {printEst && <Ticket est={printEst} escuelaNombre={escuelaDe(printEst.escuelaId)?.nombre || ""} tasaHoy={tasa.usd} />}
       </div>
     </div>
   );

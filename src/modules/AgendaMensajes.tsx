@@ -1,17 +1,14 @@
 import React, { useMemo, useState } from "react";
 import {
-  CalendarPlus, Camera, Check, ChevronLeft, ChevronRight, Clock, MessageSquare, Pencil, Plus,
-  Smartphone, Trash2,
+  CalendarDays, CalendarPlus, Camera, Check, ChevronLeft, ChevronRight, Clock, MessageSquare,
+  Pencil, Plus, Smartphone, Trash2,
 } from "lucide-react";
 import { useApp } from "../lib/store";
 import type { Evento, MensajeLog, Sesion } from "../lib/data";
 import { PAQUETES, PLANTILLAS_MENSAJE, estudianteTotales, fmtFecha, fmtUSD, todayISO, uid, waLink } from "../lib/data";
 import { Badge, EmptyState, Field, Modal, SectionHead } from "../components/ui";
 
-const rep = (s: string, k: string, v: string) => s.split(k).join(v);
-
-/* ================= SESIONES FOTOGRÁFICAS ================= */
-
+/* ============ SESIONES FOTOGRÁFICAS ============ */
 const sesionVacia = (): Sesion => ({ id: "", escuelaId: "", fecha: todayISO(), hora: "09:00", fotografo: "", estado: "Agendada", fotos: 0, nota: "" });
 
 export function Sesiones() {
@@ -32,14 +29,12 @@ export function Sesiones() {
     success();
     setForm(null);
   };
-
   const eliminar = async (s: Sesion) => {
     const ok = await confirm({ title: "¿Está seguro de eliminar este registro?", message: "Se eliminará la sesión fotográfica.", confirmText: "Eliminar", danger: true });
     if (!ok) return;
     deleteSesion(s.id);
     toast("Registro eliminado", "warn");
   };
-
   const lista = [...db.sesiones].sort((a, b) => b.fecha.localeCompare(a.fecha));
 
   return (
@@ -53,66 +48,65 @@ export function Sesiones() {
         <button className="btn btn-primary" onClick={() => { setErrs({}); setForm(sesionVacia()); }}><Plus size={16} /> Nueva sesión</button>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      <div className="row g-4">
         {lista.map((s, i) => {
           const es = db.escuelas.find((x) => x.id === s.escuelaId);
           const estudiantes = db.estudiantes.filter((e) => e.escuelaId === s.escuelaId).length;
           return (
-            <div key={s.id} className="card p-5 reveal transition-all hover:-translate-y-0.5 hover:shadow-[var(--shadow-md)]" style={{ animationDelay: `${i * 50}ms` }}>
-              <div className="flex items-start gap-4">
-                <div className="w-14 h-14 rounded-2xl flex flex-col items-center justify-center font-display flex-shrink-0" style={{ background: s.estado === "Realizada" ? "var(--green-tint)" : "var(--blue)", color: s.estado === "Realizada" ? "var(--green)" : "#fff" }}>
-                  <span className="text-[18px] font-bold leading-none">{s.fecha.slice(8, 10)}</span>
-                  <span className="text-[9px] uppercase tracking-wider opacity-80">{new Date(s.fecha + "T12:00").toLocaleDateString("es-VE", { month: "short" })}</span>
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <h3 className="font-display font-bold text-[15px] m-0 truncate">{es?.nombre || "Escuela"}</h3>
-                    <Badge tone={s.estado === "Realizada" ? "green" : "blue"} dot>{s.estado}</Badge>
+            <div key={s.id} className="col-12 col-lg-6 col-xl-4">
+              <div className="card p-4 h-100 reveal card-lift" style={{ animationDelay: `${i * 50}ms` }}>
+                <div className="d-flex align-items-start gap-3">
+                  <div className="d-flex flex-column align-items-center justify-content-center rounded-3 font-display flex-shrink-0" style={{ width: 56, height: 56, background: s.estado === "Realizada" ? "var(--tint-ok)" : "var(--jyg-navy)", color: s.estado === "Realizada" ? "var(--ok)" : "#fff" }}>
+                    <span style={{ fontSize: 18, fontWeight: 700, lineHeight: 1 }}>{s.fecha.slice(8, 10)}</span>
+                    <span className="text-uppercase" style={{ fontSize: 9, letterSpacing: 1, opacity: 0.85 }}>{new Date(s.fecha + "T12:00").toLocaleDateString("es-VE", { month: "short" })}</span>
                   </div>
-                  <p className="text-[12.5px] mt-0.5 mb-2" style={{ color: "var(--ink-soft)" }}>
-                    <Clock size={12} className="inline mr-1" />{s.hora} h · 📷 {s.fotografo} · {estudiantes} estudiantes
-                  </p>
-                  {s.nota && <p className="text-[12px] italic m-0 mb-2" style={{ color: "var(--ink-faint)" }}>{s.nota}</p>}
-                  {s.estado === "Realizada" && <Badge tone="gold">{s.fotos} fotos capturadas</Badge>}
-                </div>
-                <div className="flex flex-col gap-1">
-                  <button className="icon-btn" onClick={() => { setErrs({}); setForm(s); }}><Pencil size={15} /></button>
-                  <button className="icon-btn danger" onClick={() => eliminar(s)}><Trash2 size={15} /></button>
+                  <div className="flex-grow-1" style={{ minWidth: 0 }}>
+                    <div className="d-flex align-items-center gap-2 flex-wrap">
+                      <h3 className="font-display fw-bold text-truncate m-0" style={{ fontSize: 15 }}>{es?.nombre || "Escuela"}</h3>
+                      <Badge tone={s.estado === "Realizada" ? "green" : "blue"} dot>{s.estado}</Badge>
+                    </div>
+                    <p style={{ fontSize: 12.5, margin: "2px 0 6px", color: "var(--ink-soft)" }}>
+                      <Clock size={12} className="me-1" style={{ verticalAlign: "-1.5px" }} />{s.hora} h · 📷 {s.fotografo} · {estudiantes} estudiantes
+                    </p>
+                    {s.nota && <p className="fst-italic" style={{ fontSize: 12, margin: "0 0 6px", color: "var(--ink-faint)" }}>{s.nota}</p>}
+                    {s.estado === "Realizada" && <Badge tone="gold">{s.fotos} fotos capturadas</Badge>}
+                  </div>
+                  <div className="d-flex flex-column gap-1">
+                    <button className="icon-btn" onClick={() => { setErrs({}); setForm(s); }} title="Editar"><Pencil size={15} /></button>
+                    <button className="icon-btn danger" onClick={() => eliminar(s)} title="Eliminar"><Trash2 size={15} /></button>
+                  </div>
                 </div>
               </div>
             </div>
           );
         })}
       </div>
-      {lista.length === 0 && <div className="card"><EmptyState icon={Camera} title="Sin sesiones" text="Agenda la primera toma fotográfica." /></div>}
+      {lista.length === 0 && <div className="card mt-3"><EmptyState icon={Camera} title="Sin sesiones" text="Agenda la primera toma fotográfica." /></div>}
 
       {form && (
-        <Modal open onClose={() => setForm(null)} title={form.id ? "Editar sesión" : "Nueva sesión fotográfica"}>
-          <div className="grid grid-cols-2 gap-4">
-            <Field label="Escuela" required error={errs.escuelaId} className="col-span-2">
+        <Modal open onClose={() => setForm(null)} title={form.id ? "Editar sesión" : "Nueva sesión fotográfica"}
+          footer={<><button className="btn btn-ghost" onClick={() => setForm(null)}>Cancelar</button><button className="btn btn-primary" onClick={guardar}><Check size={15} /> Sí, Guardar</button></>}>
+          <div className="row g-3">
+            <Field label="Escuela" required error={errs.escuelaId} className="col-12">
               <select className={`select ${errs.escuelaId ? "err" : ""}`} value={form.escuelaId} onChange={(e) => setForm({ ...form, escuelaId: e.target.value })}>
                 <option value="">— Seleccione —</option>
                 {db.escuelas.map((e) => <option key={e.id} value={e.id}>{e.nombre}</option>)}
               </select>
             </Field>
-            <Field label="Fecha"><input type="date" className="input" value={form.fecha} onChange={(e) => setForm({ ...form, fecha: e.target.value })} /></Field>
-            <Field label="Hora"><input type="time" className="input" value={form.hora} onChange={(e) => setForm({ ...form, hora: e.target.value })} /></Field>
-            <Field label="Fotógrafo(a)" required error={errs.fotografo}>
+            <Field label="Fecha" className="col-md-6"><input type="date" className="input" value={form.fecha} onChange={(e) => setForm({ ...form, fecha: e.target.value })} /></Field>
+            <Field label="Hora" className="col-md-6"><input type="time" className="input" value={form.hora} onChange={(e) => setForm({ ...form, hora: e.target.value })} /></Field>
+            <Field label="Fotógrafo(a)" required error={errs.fotografo} className="col-md-6">
               <input className={`input ${errs.fotografo ? "err" : ""}`} value={form.fotografo} onChange={(e) => setForm({ ...form, fotografo: e.target.value })} />
             </Field>
-            <Field label="Estado">
+            <Field label="Estado" className="col-md-6">
               <select className="select" value={form.estado} onChange={(e) => setForm({ ...form, estado: e.target.value as Sesion["estado"] })}>
                 <option>Agendada</option><option>Realizada</option>
               </select>
             </Field>
             {form.estado === "Realizada" && (
-              <Field label="Fotos capturadas"><input type="number" min={0} className="input" value={form.fotos} onChange={(e) => setForm({ ...form, fotos: Number(e.target.value) || 0 })} /></Field>
+              <Field label="Fotos capturadas" className="col-md-6"><input type="number" min={0} className="input" value={form.fotos} onChange={(e) => setForm({ ...form, fotos: Number(e.target.value) || 0 })} /></Field>
             )}
-            <Field label="Nota" className="col-span-2"><textarea className="textarea" value={form.nota} onChange={(e) => setForm({ ...form, nota: e.target.value })} /></Field>
-          </div>
-          <div className="flex justify-end gap-2 mt-5">
-            <button className="btn btn-ghost" onClick={() => setForm(null)}>Cancelar</button>
-            <button className="btn btn-primary" onClick={guardar}><Check size={15} /> Sí, Guardar</button>
+            <Field label="Nota" className="col-12"><textarea className="textarea" value={form.nota} onChange={(e) => setForm({ ...form, nota: e.target.value })} /></Field>
           </div>
         </Modal>
       )}
@@ -120,13 +114,12 @@ export function Sesiones() {
   );
 }
 
-/* ================= AGENDA / CALENDARIO ================= */
-
+/* ============ AGENDA / CALENDARIO ============ */
 const TIPO_EVENTO: Record<string, { label: string; color: string }> = {
-  sesion: { label: "Sesión", color: "var(--blue)" },
-  entrega: { label: "Entrega", color: "var(--green)" },
-  cobranza: { label: "Cobranza", color: "var(--amber)" },
-  otro: { label: "Otro", color: "var(--gold-deep)" },
+  sesion: { label: "Sesión", color: "var(--jyg-navy)" },
+  entrega: { label: "Entrega", color: "var(--ok)" },
+  cobranza: { label: "Cobranza", color: "var(--warn)" },
+  otro: { label: "Otro", color: "var(--jyg-gold-deep)" },
 };
 
 export function Agenda() {
@@ -135,9 +128,10 @@ export function Agenda() {
   const [form, setForm] = useState<Evento | null>(null);
 
   const dias = useMemo(() => {
-    const inicio = new Date(mes);
-    const dow = (inicio.getDay() + 6) % 7;
-    inicio.setDate(inicio.getDate() - dow);
+    const primerDia = new Date(mes);
+    const inicio = new Date(primerDia);
+    const dow = (primerDia.getDay() + 6) % 7;
+    inicio.setDate(primerDia.getDate() - dow);
     return Array.from({ length: 42 }, (_, i) => {
       const d = new Date(inicio);
       d.setDate(inicio.getDate() + i);
@@ -157,7 +151,6 @@ export function Agenda() {
     success();
     setForm(null);
   };
-
   const eliminar = async (e: Evento) => {
     const ok = await confirm({ title: "¿Está seguro de eliminar este registro?", message: `"${e.titulo}" se quitará de la agenda.`, confirmText: "Eliminar", danger: true });
     if (!ok) return;
@@ -178,86 +171,99 @@ export function Agenda() {
         </button>
       </div>
 
-      <div className="grid grid-cols-1 xl:grid-cols-[1fr_320px] gap-5">
-        <div className="card p-5">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="font-display font-bold text-[17px] m-0 capitalize">{mes.toLocaleDateString("es-VE", { month: "long", year: "numeric" })}</h3>
-            <div className="flex gap-1.5">
-              <button className="icon-btn" onClick={() => setMes(new Date(mes.getFullYear(), mes.getMonth() - 1, 1))}><ChevronLeft size={17} /></button>
-              <button className="btn btn-soft btn-sm" onClick={() => { const d = new Date(); setMes(new Date(d.getFullYear(), d.getMonth(), 1)); }}>Hoy</button>
-              <button className="icon-btn" onClick={() => setMes(new Date(mes.getFullYear(), mes.getMonth() + 1, 1))}><ChevronRight size={17} /></button>
+      <div className="row g-4">
+        <div className="col-12 col-xl-8">
+          <div className="card p-4">
+            <div className="d-flex align-items-center justify-content-between mb-3">
+              <h3 className="font-display fw-bold text-capitalize m-0" style={{ fontSize: 17 }}>
+                {mes.toLocaleDateString("es-VE", { month: "long", year: "numeric" })}
+              </h3>
+              <div className="d-flex gap-1">
+                <button className="icon-btn" onClick={() => setMes(new Date(mes.getFullYear(), mes.getMonth() - 1, 1))} aria-label="Mes anterior"><ChevronLeft size={17} /></button>
+                <button className="btn btn-soft btn-sm" onClick={() => { const d = new Date(); setMes(new Date(d.getFullYear(), d.getMonth(), 1)); }}>Hoy</button>
+                <button className="icon-btn" onClick={() => setMes(new Date(mes.getFullYear(), mes.getMonth() + 1, 1))} aria-label="Mes siguiente"><ChevronRight size={17} /></button>
+              </div>
             </div>
-          </div>
-          <div className="grid grid-cols-7 gap-1.5 mb-1.5">
-            {["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"].map((d) => (
-              <div key={d} className="text-center font-display font-semibold text-[11px] uppercase tracking-wider py-1" style={{ color: "var(--ink-faint)" }}>{d}</div>
-            ))}
-          </div>
-          <div className="grid grid-cols-7 gap-1.5">
-            {dias.map((d) => {
-              const iso = d.toISOString().slice(0, 10);
-              const evs = eventosDe(iso);
-              const esHoy = iso === hoyISO;
-              const delMes = d.getMonth() === mes.getMonth();
-              return (
-                <button key={iso} onClick={() => setForm({ id: "", fecha: iso, hora: "10:00", titulo: "", tipo: "otro" })}
-                  className="min-h-[74px] rounded-xl p-1.5 text-left border-none cursor-pointer transition-all hover:scale-[1.03]"
-                  style={{ background: esHoy ? "var(--blue-tint-2)" : "var(--surface-2)", opacity: delMes ? 1 : 0.45, border: esHoy ? "1.5px solid var(--blue)" : "1.5px solid transparent", boxShadow: "var(--shadow-sm)" }}>
-                  <span className="font-display font-bold text-[12px] block" style={{ color: esHoy ? "var(--blue)" : "var(--ink-soft)" }}>{d.getDate()}</span>
-                  <span className="flex flex-col gap-0.5 mt-1">
-                    {evs.slice(0, 2).map((e) => (
-                      <span key={e.id} className="text-[9.5px] font-bold px-1.5 py-0.5 rounded-md truncate" style={{ background: `color-mix(in srgb, ${TIPO_EVENTO[e.tipo].color} 16%, transparent)`, color: TIPO_EVENTO[e.tipo].color }}>
-                        {e.titulo}
+            <div className="row g-1 mb-1">
+              {["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"].map((d) => (
+                <div key={d} className="col text-center font-display fw-semibold text-uppercase py-1" style={{ fontSize: 11, letterSpacing: 1, color: "var(--ink-faint)" }}>{d}</div>
+              ))}
+            </div>
+            <div className="row g-1">
+              {dias.map((d) => {
+                const iso = d.toISOString().slice(0, 10);
+                const evs = eventosDe(iso);
+                const esHoy = iso === hoyISO;
+                const delMes = d.getMonth() === mes.getMonth();
+                return (
+                  <div key={iso} className="col" style={{ width: "14.285%", flex: "0 0 14.285%" }}>
+                    <button className="w-100 border-0 rounded-3 p-1 text-start" onClick={() => setForm({ id: "", fecha: iso, hora: "10:00", titulo: "", tipo: "otro" })}
+                      style={{ minHeight: 74, background: esHoy ? "var(--tint-navy-2)" : "var(--card-bg-2)", opacity: delMes ? 1 : 0.45, border: esHoy ? "1.5px solid var(--jyg-navy)" : "1.5px solid transparent", cursor: "pointer", transition: "transform .15s" }}>
+                      <span className="font-display fw-bold d-block" style={{ fontSize: 12, color: esHoy ? "var(--jyg-navy)" : "var(--ink-soft)" }}>{d.getDate()}</span>
+                      <span className="d-flex flex-column gap-1 mt-1">
+                        {evs.slice(0, 2).map((e) => (
+                          <span key={e.id} className="fw-bold px-1 rounded-2 text-truncate" style={{ fontSize: 9.5, background: `color-mix(in srgb, ${TIPO_EVENTO[e.tipo].color} 16%, transparent)`, color: TIPO_EVENTO[e.tipo].color }}>
+                            {e.titulo}
+                          </span>
+                        ))}
+                        {evs.length > 2 && <span className="fw-bold px-1" style={{ fontSize: 9, color: "var(--ink-faint)" }}>+{evs.length - 2} más</span>}
                       </span>
-                    ))}
-                    {evs.length > 2 && <span className="text-[9px] font-bold px-1" style={{ color: "var(--ink-faint)" }}>+{evs.length - 2} más</span>}
-                  </span>
-                </button>
-              );
-            })}
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
           </div>
         </div>
 
-        <div className="card p-5 h-fit">
-          <SectionHead title="Próximos eventos" />
-          {proximos.length === 0 ? (
-            <p className="text-[13px] m-0 py-4" style={{ color: "var(--ink-faint)" }}>Nada agendado. Haz clic en un día para crear.</p>
-          ) : (
-            <div className="flex flex-col gap-2.5">
-              {proximos.map((e) => (
-                <div key={e.id} className="flex items-center gap-3 p-2.5 rounded-xl group" style={{ background: "var(--surface-2)" }}>
-                  <span className="w-2.5 h-9 rounded-full flex-shrink-0" style={{ background: TIPO_EVENTO[e.tipo].color }} />
-                  <div className="flex-1 min-w-0">
-                    <div className="font-display font-semibold text-[13px] truncate">{e.titulo}</div>
-                    <div className="text-[11px]" style={{ color: "var(--ink-faint)" }}>{fmtFecha(e.fecha)} · {e.hora} h · {TIPO_EVENTO[e.tipo].label}</div>
+        <div className="col-12 col-xl-4">
+          <div className="card p-4">
+            <SectionHead title="Próximos eventos" />
+            {proximos.length === 0 ? (
+              <p style={{ fontSize: 13, color: "var(--ink-faint)", padding: "12px 0" }}>Nada agendado. Haz clic en un día para crear.</p>
+            ) : (
+              <div className="d-flex flex-column gap-2">
+                {proximos.map((e) => (
+                  <div key={e.id} className="d-flex align-items-center gap-2 p-2 rounded-3" style={{ background: "var(--card-bg-2)" }}>
+                    <span className="rounded-pill flex-shrink-0" style={{ width: 10, height: 36, background: TIPO_EVENTO[e.tipo].color }} />
+                    <div className="flex-grow-1" style={{ minWidth: 0 }}>
+                      <div className="font-display fw-semibold text-truncate" style={{ fontSize: 13 }}>{e.titulo}</div>
+                      <div style={{ fontSize: 11, color: "var(--ink-faint)" }}>{fmtFecha(e.fecha)} · {e.hora} h · {TIPO_EVENTO[e.tipo].label}</div>
+                    </div>
+                    <button className="icon-btn danger" onClick={() => eliminar(e)} title="Eliminar"><Trash2 size={14} /></button>
                   </div>
-                  <button className="icon-btn danger opacity-0 group-hover:opacity-100 transition-opacity" onClick={() => eliminar(e)}><Trash2 size={14} /></button>
-                </div>
-              ))}
-            </div>
-          )}
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
       {form && (
         <Modal open onClose={() => setForm(null)} title="Nuevo evento en agenda">
-          <div className="grid grid-cols-2 gap-4">
-            <Field label="Título" required className="col-span-2">
+          <div className="row g-3">
+            <Field label="Título" required className="col-12">
               <input className="input" value={form.titulo} onChange={(e) => setForm({ ...form, titulo: e.target.value })} placeholder="Ej: Entrega de pedidos — Valencia" autoFocus />
             </Field>
-            <Field label="Fecha"><input type="date" className="input" value={form.fecha} onChange={(e) => setForm({ ...form, fecha: e.target.value })} /></Field>
-            <Field label="Hora"><input type="time" className="input" value={form.hora} onChange={(e) => setForm({ ...form, hora: e.target.value })} /></Field>
-            <Field label="Tipo" className="col-span-2">
-              <div className="flex gap-2 flex-wrap">
+            <Field label="Fecha" className="col-md-6"><input type="date" className="input" value={form.fecha} onChange={(e) => setForm({ ...form, fecha: e.target.value })} /></Field>
+            <Field label="Hora" className="col-md-6"><input type="time" className="input" value={form.hora} onChange={(e) => setForm({ ...form, hora: e.target.value })} /></Field>
+            <Field label="Tipo" className="col-12">
+              <div className="d-flex gap-2 flex-wrap">
                 {Object.entries(TIPO_EVENTO).map(([k, v]) => (
-                  <button key={k} onClick={() => setForm({ ...form, tipo: k as Evento["tipo"] })} className="btn btn-sm" style={form.tipo === k ? { background: v.color, color: "#fff" } : { background: "var(--surface-2)", color: "var(--ink-soft)", border: "1.5px solid var(--border)" }}>
+                  <button key={k} onClick={() => setForm({ ...form, tipo: k as Evento["tipo"] })} className="btn btn-sm" style={form.tipo === k ? { background: v.color, color: "#fff", borderColor: v.color } : { background: "var(--card-bg-2)", color: "var(--ink-soft)", border: "1.5px solid var(--line)" }}>
                     {v.label}
                   </button>
                 ))}
               </div>
             </Field>
+            <Field label="Escuela (opcional)" className="col-12">
+              <select className="select" value={form.escuelaId || ""} onChange={(e) => setForm({ ...form, escuelaId: e.target.value || undefined })}>
+                <option value="">— Ninguna —</option>
+                {db.escuelas.map((e) => <option key={e.id} value={e.id}>{e.nombre}</option>)}
+              </select>
+            </Field>
           </div>
-          <div className="flex justify-end gap-2 mt-5">
+          <div className="d-flex justify-content-end gap-2 mt-4">
             <button className="btn btn-ghost" onClick={() => setForm(null)}>Cancelar</button>
             <button className="btn btn-primary" onClick={guardar}><Check size={15} /> Sí, Guardar</button>
           </div>
@@ -267,8 +273,7 @@ export function Agenda() {
   );
 }
 
-/* ================= MENSAJES ================= */
-
+/* ============ MENSAJES ============ */
 export function Mensajes() {
   const { db, addMensaje, success, toast } = useApp();
   const [estId, setEstId] = useState(db.estudiantes[0]?.id || "");
@@ -284,6 +289,7 @@ export function Mensajes() {
     if (!s) return;
     const t = estudianteTotales(s);
     const escuela = db.escuelas.find((x) => x.id === s.escuelaId)?.nombre || "su escuela";
+    const rep = (str: string, k: string, v: string) => str.split(k).join(v);
     let cuerpo = p.cuerpo;
     cuerpo = rep(cuerpo, "{{representante}}", s.representante || "representante");
     cuerpo = rep(cuerpo, "{{estudiante}}", s.nombre);
@@ -295,8 +301,7 @@ export function Mensajes() {
     setTexto(cuerpo);
   };
 
-  React.useEffect(() => { rellenar(plantillaId, estId); // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [plantillaId, estId]);
+  React.useEffect(() => { rellenar(plantillaId, estId); }, [plantillaId, estId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const enviarWA = () => {
     if (!est) return;
@@ -316,40 +321,39 @@ export function Mensajes() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 xl:grid-cols-[330px_1fr] gap-5">
-        <div className="flex flex-col gap-4">
-          <div className="card p-4">
+      <div className="row g-4">
+        <div className="col-12 col-xl-4">
+          <div className="card p-4 mb-4">
             <Field label="Destinatario (estudiante)">
               <select className="select" value={estId} onChange={(e) => setEstId(e.target.value)}>
                 {db.estudiantes.map((e) => <option key={e.id} value={e.id}>{e.nombre} — {e.representante}</option>)}
               </select>
             </Field>
             {est && (
-              <div className="mt-3 p-3 rounded-xl text-[12.5px]" style={{ background: "var(--surface-2)" }}>
-                <div className="flex justify-between"><span style={{ color: "var(--ink-faint)" }}>Teléfono</span><b>{est.telefono || "—"}</b></div>
-                <div className="flex justify-between mt-1"><span style={{ color: "var(--ink-faint)" }}>Saldo</span><b style={{ color: estudianteTotales(est).saldo > 0 ? "var(--red)" : "var(--green)" }}>{fmtUSD(estudianteTotales(est).saldo)}</b></div>
+              <div className="mt-3 p-3 rounded-3" style={{ background: "var(--card-bg-2)", fontSize: 12.5 }}>
+                <div className="d-flex justify-content-between"><span style={{ color: "var(--ink-faint)" }}>Teléfono</span><b>{est.telefono || "—"}</b></div>
+                <div className="d-flex justify-content-between mt-1"><span style={{ color: "var(--ink-faint)" }}>Saldo</span><b style={{ color: estudianteTotales(est).saldo > 0 ? "var(--danger)" : "var(--ok)" }}>{fmtUSD(estudianteTotales(est).saldo)}</b></div>
               </div>
             )}
           </div>
-
           <div className="card p-4">
             <SectionHead title="Plantillas" />
-            <div className="flex flex-col gap-2">
+            <div className="d-flex flex-column gap-2">
               {PLANTILLAS_MENSAJE.map((p) => (
-                <button key={p.id} onClick={() => setPlantillaId(p.id)} className="text-left p-3 rounded-xl border-none cursor-pointer transition-all hover:translate-x-1" style={{ background: plantillaId === p.id ? "var(--blue-tint-2)" : "var(--surface-2)", outline: plantillaId === p.id ? "1.5px solid var(--blue)" : "1.5px solid transparent", color: "var(--ink)" }}>
-                  <span className="block font-display font-semibold text-[13px]">{p.nombre}</span>
-                  <span className="block text-[11.5px] truncate" style={{ color: "var(--ink-faint)" }}>{p.cuerpo.slice(0, 60)}…</span>
+                <button key={p.id} onClick={() => setPlantillaId(p.id)} className="text-start p-2 rounded-3 border-0 w-100" style={{ background: plantillaId === p.id ? "var(--tint-navy-2)" : "var(--card-bg-2)", outline: plantillaId === p.id ? "1.5px solid var(--jyg-navy)" : "1.5px solid transparent", color: "var(--ink)", cursor: "pointer" }}>
+                  <span className="d-block font-display fw-semibold" style={{ fontSize: 13 }}>{p.nombre}</span>
+                  <span className="d-block text-truncate" style={{ fontSize: 11.5, color: "var(--ink-faint)" }}>{p.cuerpo.slice(0, 60)}…</span>
                 </button>
               ))}
             </div>
           </div>
         </div>
 
-        <div className="flex flex-col gap-5">
-          <div className="card p-5">
+        <div className="col-12 col-xl-8">
+          <div className="card p-4 mb-4">
             <SectionHead title="Vista previa del mensaje" desc="Se rellena automáticamente con los datos del estudiante — editable" />
             <textarea className="textarea" style={{ minHeight: 170, fontSize: 14 }} value={texto} onChange={(e) => setTexto(e.target.value)} />
-            <div className="flex gap-2 mt-3 flex-wrap">
+            <div className="d-flex gap-2 mt-3">
               <button className="btn btn-primary" style={{ background: "#1f9d55" }} onClick={enviarWA} disabled={!est}>
                 <Smartphone size={16} /> Enviar por WhatsApp
               </button>
@@ -357,20 +361,20 @@ export function Mensajes() {
             </div>
           </div>
 
-          <div className="card p-5">
+          <div className="card p-4">
             <SectionHead title={`Historial (${db.mensajes.length})`} />
             {db.mensajes.length === 0 ? (
               <EmptyState icon={MessageSquare} title="Sin mensajes enviados" text="Los mensajes enviados quedarán registrados aquí." />
             ) : (
-              <div className="flex flex-col gap-2.5 max-h-[340px] overflow-y-auto pr-1">
+              <div className="d-flex flex-column gap-2" style={{ maxHeight: 340, overflowY: "auto" }}>
                 {db.mensajes.map((m: MensajeLog) => (
-                  <div key={m.id} className="p-3 rounded-xl" style={{ background: "var(--surface-2)", border: "1px solid var(--border-soft)" }}>
-                    <div className="flex items-center gap-2 flex-wrap mb-1">
+                  <div key={m.id} className="p-2 rounded-3" style={{ background: "var(--card-bg-2)", border: "1px solid var(--line-soft)" }}>
+                    <div className="d-flex align-items-center gap-2 flex-wrap mb-1">
                       <Badge tone="green" dot>WhatsApp</Badge>
-                      <span className="font-display font-semibold text-[13px]">{m.destinatario}</span>
-                      <span className="text-[11px]" style={{ color: "var(--ink-faint)" }}>{m.telefono} · {fmtFecha(m.fecha)} · {m.plantilla}</span>
+                      <span className="font-display fw-semibold" style={{ fontSize: 13 }}>{m.destinatario}</span>
+                      <span style={{ fontSize: 11, color: "var(--ink-faint)" }}>{m.telefono} · {fmtFecha(m.fecha)} · {m.plantilla}</span>
                     </div>
-                    <p className="text-[12.5px] m-0 truncate" style={{ color: "var(--ink-soft)" }}>{m.texto}</p>
+                    <p className="text-truncate m-0" style={{ fontSize: 12.5, color: "var(--ink-soft)" }}>{m.texto}</p>
                   </div>
                 ))}
               </div>
@@ -378,6 +382,7 @@ export function Mensajes() {
           </div>
         </div>
       </div>
+      <span className="d-none"><CalendarDays size={1} /></span>
     </div>
   );
 }

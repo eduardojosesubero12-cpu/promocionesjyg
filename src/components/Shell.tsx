@@ -1,16 +1,15 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
-  BarChart3, Bell, Boxes, CalendarDays, Camera, ChevronRight, Clock, Contact,
-  GraduationCap, LayoutDashboard, Menu, MessageSquare, Moon, Package, Plug, QrCode, Receipt,
-  RefreshCw, ScanLine, School, Search, Settings, ShoppingBag, Sun, Ticket, UserCog, Users, Wallet, X,
+  BarChart3, Bell, Boxes, CalendarDays, Camera, ChevronDown, ChevronRight, Contact, DollarSign,
+  GraduationCap, LayoutDashboard, LogOut, Menu, MessageSquare, Moon, Package, Plug, QrCode,
+  Receipt, ScanLine, School, Search, Settings, Sun, Ticket, UserCog, Users, Wallet, X,
 } from "lucide-react";
-import { useApp, ACCESS, ROUTE_TITLE } from "../lib/store";
-import type { Route } from "../lib/store";
-import { fmtBs, fmtFechaHoraViva, fmtHaceSegundos } from "../lib/data";
-import { useNow, useReloj } from "./ui";
+import { useApp, ROUTE_TITLE, SECTION_OF, type Route } from "../lib/store";
+import { fmtBs, fmtHaceSegundos, fmtUSD, estudianteTotales } from "../lib/data";
+import { useNow } from "./ui";
 
-const NAV: { section: string; items: { id: Route; label: string; icon: any }[] }[] = [
-  { section: "Principal", items: [{ id: "dashboard", label: "Dashboard", icon: LayoutDashboard }] },
+const MENU: { section: string; items: { id: Route; label: string; icon: any }[] }[] = [
+  { section: "", items: [{ id: "dashboard", label: "Dashboard", icon: LayoutDashboard }] },
   {
     section: "CRM",
     items: [
@@ -18,7 +17,7 @@ const NAV: { section: string; items: { id: Route; label: string; icon: any }[] }
       { id: "escuelas", label: "Escuelas", icon: School },
       { id: "docentes", label: "Profesores", icon: Users },
       { id: "estudiantes", label: "Estudiantes", icon: GraduationCap },
-      { id: "ventas", label: "Ventas", icon: ShoppingBag },
+      { id: "ventas", label: "Ventas", icon: Wallet },
       { id: "paquetes", label: "Paquetes", icon: Package },
       { id: "cotizaciones", label: "Cotizaciones", icon: Receipt },
       { id: "mensajes", label: "Mensajes", icon: MessageSquare },
@@ -40,165 +39,145 @@ const NAV: { section: string; items: { id: Route; label: string; icon: any }[] }
     items: [
       { id: "reportes", label: "Reportes", icon: BarChart3 },
       { id: "usuarios", label: "Usuarios", icon: UserCog },
+    ],
+  },
+  {
+    section: "Sistema",
+    items: [
       { id: "config", label: "Configuración", icon: Settings },
       { id: "integraciones", label: "Integraciones", icon: Plug },
     ],
   },
 ];
 
-function Sidebar() {
-  const { route, setRoute, can, mobileNav, setMobileNav, collapsed } = useApp();
+function MenuList({ onGo, mini }: { onGo: (r: Route) => void; mini?: boolean }) {
+  const { route, can, setCurrentUser, db, user } = useApp();
   return (
-    <aside id="sidebar" className={mobileNav ? "show" : ""}>
-      <div className="sidebar-logo">
-        <span className="mark"><GraduationCap size={24} /></span>
-        <div>
-          <b>Promociones JyG</b>
-          <small>CRM de Grados</small>
-        </div>
-        <button className="icon-btn ml-auto" style={{ display: mobileNav ? "inline-flex" : "none" }} onClick={() => setMobileNav(false)} aria-label="Cerrar menú"><X size={17} /></button>
-      </div>
-      <nav style={{ paddingBottom: 8 }}>
-        {NAV.map((g) => {
-          const items = g.items.filter((i) => can(i.id));
-          if (!items.length) return null;
-          return (
-            <div key={g.section}>
-              <div className="nav-section">{g.section}</div>
-              {items.map((i) => (
-                <button key={i.id} className={`nav-item ${route === i.id ? "active" : ""}`} onClick={() => setRoute(i.id)} title={i.label}>
-                  <i.icon size={17} style={{ flexShrink: 0 }} />
-                  <span style={collapsed ? { display: "none" } : undefined}>{i.label}</span>
-                </button>
-              ))}
-            </div>
-          );
-        })}
-      </nav>
-      <div className="sidebar-foot">
-        <b style={{ color: "var(--ink-soft)" }}>Promociones JyG</b> · Paquetes de grado<br />
-        Tasa en vivo vía ve.dolarapi.com
-      </div>
-    </aside>
+    <nav className="jyg-nav py-2">
+      {MENU.map((g) => {
+        const visibles = g.items.filter((i) => can(i.id));
+        if (!visibles.length) return null;
+        return (
+          <div key={g.section || "top"}>
+            {g.section && <div className="nav-section">{g.section}</div>}
+            {visibles.map((i) => (
+              <a
+                key={i.id}
+                href="#"
+                title={i.label}
+                className={`nav-link ${route === i.id ? "active" : ""}`}
+                onClick={(e) => { e.preventDefault(); onGo(i.id); }}
+              >
+                <i.icon size={17} />
+                <span>{i.label}</span>
+              </a>
+            ))}
+          </div>
+        );
+      })}
+      <div className="nav-section">Cuenta</div>
+      <a
+        href="#"
+        title="Cambiar usuario"
+        className="nav-link logout"
+        onClick={(e) => {
+          e.preventDefault();
+          const otros = db.usuarios.filter((u) => u.id !== user.id && u.activo);
+          if (otros.length) { setCurrentUser(otros[0].id); }
+        }}
+      >
+        <LogOut size={17} />
+        <span>Cambiar usuario</span>
+      </a>
+    </nav>
   );
 }
 
-function GlobalSearch() {
-  const { db, setRoute } = useApp();
-  const [q, setQ] = useState("");
-  const [focus, setFocus] = useState(false);
-  const boxRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const h = (e: MouseEvent) => { if (boxRef.current && !boxRef.current.contains(e.target as Node)) setFocus(false); };
-    window.addEventListener("mousedown", h);
-    return () => window.removeEventListener("mousedown", h);
-  }, []);
-
-  const results = useMemo(() => {
-    const t = q.trim().toLowerCase();
-    if (t.length < 2) return [];
-    return db.estudiantes.filter((e) => [e.nombre, e.ci, e.telefono, e.representante, e.pedido].some((v) => v.toLowerCase().includes(t))).slice(0, 7);
-  }, [q, db.estudiantes]);
-
+function BrandMark() {
   return (
-    <div ref={boxRef} className="relative flex-1 max-w-[430px] hidden md:block">
-      <div className="flex items-center gap-2 h-[38px] px-3.5 rounded-full border transition-colors" style={{ background: "var(--surface-2)", borderColor: focus ? "var(--blue-500)" : "var(--border)" }}>
-        <Search size={15} style={{ color: "var(--ink-faint)" }} />
-        <input
-          className="bg-transparent border-none outline-none w-full text-[13.5px]" style={{ color: "var(--ink)" }}
-          placeholder="Buscar estudiante, cédula, pedido…" value={q}
-          onChange={(e) => setQ(e.target.value)} onFocus={() => setFocus(true)}
-        />
-      </div>
-      {focus && results.length > 0 && (
-        <div className="card absolute left-0 right-0 top-[46px] overflow-hidden z-[1200]" style={{ boxShadow: "var(--shadow-lg)" }}>
-          {results.map((e) => (
-            <button key={e.id} className="w-full text-left px-4 py-2.5 border-none cursor-pointer flex items-center gap-3 transition-colors hover:bg-[var(--surface-2)]" style={{ background: "var(--surface)", color: "var(--ink)" }}
-              onClick={() => { setRoute("estudiantes", { open: e.id }); setQ(""); }}>
-              <span className="w-8 h-8 rounded-lg flex items-center justify-center font-display font-bold text-[11px]" style={{ background: "var(--blue-tint-2)", color: "var(--blue)" }}>{e.nombre[0]}</span>
-              <span className="flex-1 min-w-0">
-                <span className="block font-display font-semibold text-[13px] truncate">{e.nombre}</span>
-                <span className="block text-[11px]" style={{ color: "var(--ink-faint)" }}>{e.pedido} · {e.ci || "S/C"}</span>
-              </span>
-              <ChevronRight size={15} style={{ color: "var(--ink-faint)" }} />
-            </button>
-          ))}
-        </div>
-      )}
+    <div className="jyg-brand">
+      <span className="mark"><GraduationCap size={22} /></span>
+      <span>
+        <b>Promociones JyG</b>
+        <small>CRM de Grados</small>
+      </span>
     </div>
   );
 }
 
+/* Chip de tasa en vivo */
 function TasaChip() {
-  const { tasa, refreshTasa, tasaLoading } = useApp();
+  const { tasa, tasaLoading, refreshTasa, setRoute } = useApp();
   const now = useNow(1000);
   return (
-    <button onClick={refreshTasa} className="tasa-chip flex items-center gap-2.5 h-[38px] pl-3 pr-2 rounded-full border cursor-pointer transition-all hover:-translate-y-px" style={{ background: "var(--surface)", borderColor: "var(--border)", boxShadow: "var(--shadow-sm)" }} title={`Tasa del día · actualizada ${fmtFechaHoraViva(tasa.updated, now)} — clic para refrescar`}>
-      <span className="pulse-dot rounded-full" style={{ width: 8, height: 8, background: tasa.source === "api" ? "var(--green)" : "var(--amber)", flexShrink: 0 }} />
-      <span className="tasa-chip-txt text-left leading-tight">
-        <span className="block font-display font-bold text-[12.5px]" style={{ color: "var(--ink)" }}>{fmtBs(tasa.usd)} <span style={{ color: "var(--ink-faint)" }}>/ $1</span></span>
-        <span className="block text-[10px] font-semibold tracking-wide uppercase" style={{ color: "var(--ink-faint)" }}>
-          {tasa.eur ? `€ ${fmtBs(tasa.eur).replace("Bs. ", "")} · ` : ""}{fmtHaceSegundos(tasa.updated, now)}
-        </span>
-      </span>
-      <span className={`w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 ${tasaLoading ? "spin" : ""}`} style={{ background: "var(--blue-tint-2)", color: "var(--blue)" }}>
-        <RefreshCw size={13} />
+    <button
+      className="tasa-chip"
+      onClick={() => setRoute("integraciones")}
+      title={`Tasa del día · ${tasa.apiOk ? "ve.dolarapi.com" : "tasa de respaldo"} · actualizada ${fmtHaceSegundos(tasa.updated, now)}`}
+    >
+      <span className="tasa-ic"><DollarSign size={13} /></span>
+      <span className="tasa-chip-txt text-start">
+        <b className="tabular-nums">{tasaLoading ? "…" : fmtBs(tasa.usd)}</b>
+        <small>tasa del día {tasa.eur > 0 && `· € ${fmtBs(tasa.eur).replace("Bs ", "")}`}</small>
       </span>
     </button>
   );
 }
 
-function LiveClock() {
-  const { completa } = useReloj(true, 1000);
-  return (
-    <div className="hidden lg:flex items-center gap-2 h-[38px] px-3.5 rounded-full border" style={{ background: "var(--surface)", borderColor: "var(--border)", boxShadow: "var(--shadow-sm)" }} title="Fecha y hora local en tiempo real">
-      <Clock size={14} style={{ color: "var(--blue)" }} />
-      <span className="font-display font-semibold text-[12px] tabular-nums" style={{ color: "var(--ink-soft)" }}>{completa}</span>
-    </div>
-  );
-}
-
-function Notifications() {
-  const { alerts, setRoute } = useApp();
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-  const total = alerts.reduce((s, a) => s + (parseInt(a.title) || 0), 0);
+/* Buscador global con Ctrl+K */
+function GlobalSearch() {
+  const { db, setRoute } = useApp();
+  const [q, setQ] = useState("");
+  const [focus, setFocus] = useState(false);
+  const ref = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    const h = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); };
-    window.addEventListener("mousedown", h);
-    return () => window.removeEventListener("mousedown", h);
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") { e.preventDefault(); ref.current?.focus(); }
+      if (e.key === "Escape") { setFocus(false); ref.current?.blur(); }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  const icons: Record<string, any> = { pagos: Wallet, fotos: Camera, entrega: Boxes };
-  const colors: Record<string, string> = { pagos: "var(--amber)", fotos: "var(--red)", entrega: "var(--green)" };
+  const resultados = useMemo(() => {
+    const t = q.trim().toLowerCase();
+    if (!t) return [];
+    return db.estudiantes.filter((e) => [e.nombre, e.ci, e.pedido, e.representante].some((v) => v.toLowerCase().includes(t))).slice(0, 7);
+  }, [q, db.estudiantes]);
+
   return (
-    <div ref={ref} className="relative">
-      <button className="icon-btn relative" onClick={() => setOpen((v) => !v)} aria-label="Notificaciones">
-        <Bell size={18} />
-        {total > 0 && (
-          <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full text-[10px] font-bold flex items-center justify-center" style={{ background: "var(--red)", color: "#fff", border: "2px solid var(--surface)" }}>
-            {total}
-          </span>
-        )}
-      </button>
-      {open && (
-        <div className="card absolute right-0 top-[46px] w-[320px] overflow-hidden z-[1200]" style={{ boxShadow: "var(--shadow-lg)" }}>
-          <div className="px-4 py-3 font-display font-bold text-[13.5px] border-b" style={{ borderColor: "var(--border-soft)" }}>Alertas del sistema</div>
-          {alerts.length === 0 ? (
-            <p className="px-4 py-5 text-[12.5px] m-0" style={{ color: "var(--ink-faint)" }}>Todo al día — sin alertas pendientes 🎉</p>
+    <div className="search-box">
+      <Search size={15} className="search-ic" />
+      <input
+        ref={ref}
+        value={q}
+        onChange={(e) => setQ(e.target.value)}
+        onFocus={() => setFocus(true)}
+        onBlur={() => setTimeout(() => setFocus(false), 150)}
+        placeholder="Buscar estudiante, pedido, cédula…"
+        aria-label="Buscar"
+      />
+      {q ? (
+        <button className="search-clear" onClick={() => setQ("")} aria-label="Limpiar"><X size={11} /></button>
+      ) : (
+        <span className="kbd d-none d-md-inline">Ctrl K</span>
+      )}
+      {focus && q && (
+        <div className="search-drop">
+          {resultados.length === 0 ? (
+            <div className="px-3 py-3" style={{ fontSize: 12.5, color: "var(--ink-faint)" }}>Sin resultados para “{q}”</div>
           ) : (
-            alerts.map((a) => {
-              const Ic = icons[a.key] || Bell;
+            resultados.map((e) => {
+              const t = estudianteTotales(e);
               return (
-                <button key={a.key} className="w-full text-left px-4 py-3 border-none cursor-pointer flex items-center gap-3 transition-colors hover:bg-[var(--surface-2)]" style={{ background: "var(--surface)", color: "var(--ink)" }} onClick={() => { setRoute(a.route); setOpen(false); }}>
-                  <span className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: "var(--surface-2)", color: colors[a.key] }}><Ic size={17} /></span>
-                  <span className="flex-1">
-                    <span className="block font-display font-bold text-[14px]">{a.title}</span>
-                    <span className="block text-[11.5px]" style={{ color: "var(--ink-faint)" }}>{a.desc}</span>
+                <button key={e.id} className="search-item" onClick={() => { setRoute("estudiantes", { open: e.id }); setQ(""); }}>
+                  <span className="search-av">{e.nombre[0]}</span>
+                  <span className="flex-grow-1" style={{ minWidth: 0 }}>
+                    <span className="d-block font-display fw-semibold" style={{ fontSize: 13 }}>{e.nombre}</span>
+                    <span className="d-block" style={{ fontSize: 11, color: "var(--ink-faint)" }}>{e.pedido} · {e.ci || "S/C"} · saldo {fmtUSD(t.saldo)}</span>
                   </span>
-                  <ChevronRight size={15} style={{ color: "var(--ink-faint)" }} />
+                  <ChevronRight size={14} style={{ color: "var(--ink-faint)" }} />
                 </button>
               );
             })
@@ -209,106 +188,151 @@ function Notifications() {
   );
 }
 
-function ProfileMenu() {
-  const { db, user, setUser, can, setRoute, route } = useApp();
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    const h = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); };
-    window.addEventListener("mousedown", h);
-    return () => window.removeEventListener("mousedown", h);
-  }, []);
-  useEffect(() => {
-    if (user && !can(route)) setRoute("dashboard");
-  }, [user, can, route, setRoute]);
-  const rolLabel: Record<string, string> = { admin: "Administrador", operador: "Operador", produccion: "Producción", cobranza: "Cobranza" };
+function ThemeToggle() {
+  const { dark, toggleDark } = useApp();
   return (
-    <div ref={ref} className="relative">
-      <button className="flex items-center gap-2.5 border cursor-pointer rounded-full pl-1.5 pr-3 py-1 transition-all hover:shadow-[var(--shadow-sm)]" style={{ background: "var(--surface)", border: "1px solid var(--border)" }} onClick={() => setOpen((v) => !v)}>
-        <span className="w-8 h-8 rounded-full flex items-center justify-center font-display font-bold text-[12px]" style={{ background: "linear-gradient(150deg, var(--gold), var(--gold-deep))", color: "#3b2c00" }}>
-          {user?.nombre.split(" ").map((p) => p[0]).slice(0, 2).join("")}
-        </span>
-        <span className="hidden sm:block text-left leading-tight">
-          <span className="block font-display font-semibold text-[12.5px]" style={{ color: "var(--ink)" }}>{user?.nombre}</span>
-          <span className="block text-[10px] font-bold uppercase tracking-wide" style={{ color: "var(--gold-deep)" }}>{rolLabel[user?.rol || "admin"]}</span>
-        </span>
-      </button>
-      {open && (
-        <div className="card absolute right-0 top-[50px] w-[240px] overflow-hidden z-[1200]" style={{ boxShadow: "var(--shadow-lg)" }}>
-          <div className="px-4 py-2.5 text-[10.5px] font-display font-semibold uppercase tracking-wider border-b" style={{ color: "var(--ink-faint)", borderColor: "var(--border-soft)" }}>Cambiar de usuario</div>
-          {db.usuarios.filter((u) => u.activo).map((u) => (
-            <button key={u.id} className="w-full text-left px-4 py-2.5 border-none cursor-pointer flex items-center gap-2.5 transition-colors hover:bg-[var(--surface-2)]" style={{ background: u.id === user?.id ? "var(--blue-tint-2)" : "var(--surface)", color: "var(--ink)" }} onClick={() => { setUser(u.id); setOpen(false); }}>
-              <span className="w-7 h-7 rounded-full flex items-center justify-center font-display font-bold text-[10.5px]" style={{ background: "var(--surface-2)", color: "var(--blue)" }}>{u.nombre[0]}</span>
-              <span className="flex-1">
-                <span className="block font-display font-semibold text-[12.5px]">{u.nombre}</span>
-                <span className="block text-[10.5px]" style={{ color: "var(--ink-faint)" }}>{rolLabel[u.rol]}</span>
-              </span>
-              {u.id === user?.id && <span className="w-2 h-2 rounded-full" style={{ background: "var(--green)" }} />}
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
+    <button className={`theme-pill ${dark ? "on" : ""}`} onClick={toggleDark} role="switch" aria-checked={dark} aria-label="Cambiar tema" title={dark ? "Modo claro" : "Modo oscuro"}>
+      <Sun size={11} className="tp-ic tp-sun" />
+      <Moon size={11} className="tp-ic tp-moon" />
+      <span className="theme-knob">{dark ? <Moon size={11} /> : <Sun size={11} />}</span>
+    </button>
   );
 }
 
 export default function Shell({ children }: { children: React.ReactNode }) {
-  const { route, collapsed, setCollapsed, mobileNav, setMobileNav, dark, toggleDark, can, setOcrOpen, setRoute, user } = useApp();
-  const allowed = ACCESS[user?.rol || "admin"];
+  const { route, setRoute, can, collapsed, setCollapsed, mobileNav, setMobileNav, setOcrOpen, user, alerts } = useApp();
+  const permitido = can(route);
+  const [scrolled, setScrolled] = useState(false);
+  const [bellOpen, setBellOpen] = useState(false);
+  const [profOpen, setProfOpen] = useState(false);
 
   useEffect(() => {
-    const h = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
-        e.preventDefault();
-        (document.querySelector<HTMLInputElement>("input[placeholder*='Buscar']"))?.focus();
-      }
-    };
-    window.addEventListener("keydown", h);
-    return () => window.removeEventListener("keydown", h);
+    const onScroll = () => setScrolled(window.scrollY > 6);
+    onScroll();
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
   }, []);
 
-  return (
-    <div>
-      <Sidebar />
-      {mobileNav && <div className="overlay" style={{ zIndex: 1900, padding: 0 }} onMouseDown={() => setMobileNav(false)} />}
-      <div id="content">
-        <nav id="topbar">
-          <button className="icon-btn" onClick={() => (window.innerWidth <= 1080 ? setMobileNav(true) : setCollapsed(!collapsed))} aria-label="Menú">
-            {mobileNav ? <X size={19} /> : <Menu size={19} />}
-          </button>
-          <GlobalSearch />
-          <div className="ml-auto flex items-center gap-2.5">
-            <LiveClock />
-            <TasaChip />
-            <Notifications />
-            <button className="icon-btn" onClick={toggleDark} aria-label="Tema">
-              {dark ? <Sun size={18} /> : <Moon size={18} />}
-            </button>
-            <ProfileMenu />
-          </div>
-        </nav>
+  const go = (r: Route) => { setRoute(r); setMobileNav(false); };
 
-        {allowed.includes(route) && can(route) ? (
-          <main key={route}>{children}</main>
-        ) : (
-          <main className="page">
-            <div className="card max-w-[520px] mx-auto mt-16 p-10 text-center">
-              <div className="w-14 h-14 rounded-2xl mx-auto flex items-center justify-center mb-4" style={{ background: "var(--amber-tint)", color: "var(--amber)" }}>
-                <UserCog size={26} />
-              </div>
-              <h2 className="font-display" style={{ fontSize: 21, margin: "0 0 8px" }}>Acceso restringido</h2>
-              <p style={{ color: "var(--ink-soft)", fontSize: 13.5, margin: "0 0 20px" }}>
-                Tu rol <b>{ROUTE_TITLE[route]}</b> no tiene permiso para este módulo. Cambia de usuario o vuelve al panel.
-              </p>
-              <button className="btn btn-primary" onClick={() => setRoute("dashboard")}>Ir al Dashboard</button>
+  return (
+    <>
+      {/* Sidebar escritorio / tablet */}
+      <aside className={`jyg-sidebar-col d-none d-lg-flex ${collapsed ? "mini" : ""}`}>
+        <div className="p-3 border-bottom" style={{ borderColor: "var(--line-soft)" }}><BrandMark /></div>
+        <MenuList onGo={go} mini={collapsed} />
+        <div className="sidebar-foot">Promociones JyG · {new Date().getFullYear()}</div>
+      </aside>
+
+      {/* Offcanvas móvil */}
+      <div className={`offcanvas offcanvas-start d-lg-none ${mobileNav ? "show" : ""}`} tabIndex={-1} style={{ visibility: mobileNav ? "visible" : "hidden", width: 280 }}>
+        <div className="offcanvas-header border-bottom" style={{ borderColor: "var(--line-soft)" }}>
+          <BrandMark />
+          <button type="button" className="btn-close" onClick={() => setMobileNav(false)} aria-label="Cerrar" />
+        </div>
+        <div className="offcanvas-body d-flex flex-column p-0">
+          <MenuList onGo={go} />
+        </div>
+      </div>
+      {mobileNav && <div className="offcanvas-backdrop fade show d-lg-none" onClick={() => setMobileNav(false)} />}
+
+      {/* Contenido */}
+      <div id="content" className={collapsed ? "mini" : ""}>
+        <header className={`jyg-topbar sticky-top d-flex ${scrolled ? "scrolled" : ""}`}>
+          <div className="topbar-inner">
+            <button
+              className={`nav-tile ${collapsed ? "active" : ""}`}
+              onClick={() => setCollapsed(!collapsed)}
+              aria-label="Colapsar menú"
+              title={collapsed ? "Expandir menú" : "Colapsar menú"}
+            >
+              <Menu size={18} />
+            </button>
+            <button className="nav-tile d-lg-none" onClick={() => setMobileNav(true)} aria-label="Abrir menú"><Menu size={18} /></button>
+
+            <div className="topbar-crumb d-none d-md-flex">
+              <span className="crumb-chip">{SECTION_OF[route]}</span>
+              <ChevronRight size={13} style={{ color: "var(--ink-faint)" }} />
+              <span className="crumb-page">{ROUTE_TITLE[route]}</span>
             </div>
-          </main>
-        )}
+
+            <GlobalSearch />
+
+            <div className="topbar-right">
+              <TasaChip />
+              <ThemeToggle />
+              <span className="vr-sep" />
+
+              <div className="position-relative">
+                <button className="nav-tile" onClick={() => { setBellOpen(!bellOpen); setProfOpen(false); }} aria-label="Notificaciones">
+                  <Bell size={17} />
+                  {alerts.length > 0 && <span className="bell-badge">{alerts.length}</span>}
+                </button>
+                {bellOpen && (
+                  <div className="search-drop" style={{ right: 0, left: "auto", width: 300 }}>
+                    <div className="px-3 py-2 font-display fw-semibold" style={{ fontSize: 12.5, borderBottom: "1px solid var(--line-soft)" }}>Alertas</div>
+                    {alerts.length === 0 ? (
+                      <div className="px-3 py-3" style={{ fontSize: 12.5, color: "var(--ink-faint)" }}>Todo al día, sin alertas.</div>
+                    ) : (
+                      alerts.map((a) => (
+                        <button key={a.key} className="search-item" onClick={() => { go(a.route); setBellOpen(false); }}>
+                          <span className="flex-grow-1" style={{ minWidth: 0 }}>
+                            <span className="d-block font-display fw-semibold" style={{ fontSize: 12.5 }}>{a.title}</span>
+                            <span className="d-block" style={{ fontSize: 11, color: "var(--ink-faint)" }}>{a.desc}</span>
+                          </span>
+                          <ChevronRight size={14} style={{ color: "var(--ink-faint)" }} />
+                        </button>
+                      ))
+                    )}
+                  </div>
+                )}
+              </div>
+
+              <div className="position-relative">
+                <button className="avatar-btn" onClick={() => { setProfOpen(!profOpen); setBellOpen(false); }} aria-label="Perfil">
+                  <span className="av">{user.nombre.split(" ").map((p) => p[0]).slice(0, 2).join("")}</span>
+                  <span className="d-none d-sm-block text-start">
+                    <span className="d-block font-display fw-semibold" style={{ fontSize: 12.5, lineHeight: 1.1 }}>{user.nombre}</span>
+                    <span className="d-block" style={{ fontSize: 10.5, color: "var(--ink-faint)" }}>{user.rol}</span>
+                  </span>
+                  <ChevronDown size={13} style={{ color: "var(--ink-faint)" }} />
+                </button>
+                {profOpen && (
+                  <div className="search-drop" style={{ right: 0, left: "auto", width: 220 }}>
+                    <div className="px-3 py-2" style={{ borderBottom: "1px solid var(--line-soft)" }}>
+                      <span className="d-block font-display fw-semibold" style={{ fontSize: 13 }}>{user.nombre}</span>
+                      <span className="d-block" style={{ fontSize: 11, color: "var(--ink-faint)" }}>@{user.usuario}</span>
+                    </div>
+                    <button className="search-item" onClick={() => { go("config"); setProfOpen(false); }}><Settings size={14} /> Configuración</button>
+                    <button className="search-item" onClick={() => { go("usuarios"); setProfOpen(false); }}><UserCog size={14} /> Usuarios</button>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </header>
+
+        <main>
+          {permitido ? (
+            children
+          ) : (
+            <div className="page">
+              <div className="card p-5 text-center" style={{ maxWidth: 480, margin: "60px auto" }}>
+                <h3 className="font-display fw-bold">Acceso restringido</h3>
+                <p style={{ color: "var(--ink-soft)", fontSize: 13.5 }}>
+                  Tu rol <b>{user.rol}</b> no tiene permiso para ver este módulo.
+                </p>
+                <button className="btn btn-primary" onClick={() => setRoute("dashboard")}>Ir al Dashboard</button>
+              </div>
+            </div>
+          )}
+        </main>
       </div>
 
-      <button className="fab-ocr" onClick={() => setOcrOpen(true)} title="Escáner OCR inteligente — subir documento o tomar foto" aria-label="Escáner OCR">
-        <ScanLine size={26} />
+      {/* Botón flotante OCR */}
+      <button className="fab-ocr" onClick={() => setOcrOpen(true)} title="Escáner OCR inteligente" aria-label="Escáner OCR">
+        <ScanLine size={24} />
       </button>
-    </div>
+    </>
   );
 }

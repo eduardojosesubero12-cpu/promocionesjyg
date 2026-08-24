@@ -1,14 +1,13 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import type {
   Config, Cotizacion, Docente, Escuela, Estudiante, Evento, HistorialTasa,
-  MensajeLog, OcrDraft, Pago, PaqueteEscuela, Rol, Sesion, Usuario,
+  MensajeLog, OcrDraft, Pago, Rol, Sesion, Usuario, PaqueteEscuela,
 } from "./data";
 import {
   API_DOLARES, API_EUROS, SEED_CONFIG, SEED_COTIZACIONES, SEED_DOCENTES, SEED_ESCUELAS,
   SEED_ESTUDIANTES, SEED_EVENTOS, SEED_HISTORIAL, SEED_PAQUETES_ESCUELAS, SEED_SESIONES, SEED_USUARIOS,
-  estudianteTotales, todayISO, uid,
+  todayISO, uid,
 } from "./data";
-import { sbClient, probarConexion, subirTodo, descargarTodo, rowsToDb } from "./supabase";
 
 export type Route =
   | "dashboard" | "clientes" | "escuelas" | "docentes" | "estudiantes" | "ventas" | "cotizaciones"
@@ -19,9 +18,8 @@ export const ACCESS: Record<Rol, Route[]> = {
   admin: ["dashboard", "clientes", "escuelas", "docentes", "estudiantes", "ventas", "cotizaciones", "paquetes", "mensajes", "sesiones", "agenda", "produccion", "qr", "ocr", "facturas", "reportes", "usuarios", "config", "integraciones"],
   operador: ["dashboard", "clientes", "escuelas", "docentes", "estudiantes", "ventas", "cotizaciones", "paquetes", "mensajes", "qr", "ocr", "facturas"],
   produccion: ["dashboard", "paquetes", "produccion", "qr", "sesiones"],
-  cobranza: ["dashboard", "clientes", "estudiantes", "ventas", "reportes", "mensajes", "facturas"],
+  cobranza: ["dashboard", "clientes", "estudiantes", "ventas", "facturas", "reportes", "mensajes"],
 };
-
 export const ROUTE_TITLE: Record<Route, string> = {
   dashboard: "Dashboard", clientes: "Clientes", escuelas: "Escuelas", docentes: "Profesores",
   estudiantes: "Estudiantes", ventas: "Ventas", cotizaciones: "Cotizaciones", paquetes: "Paquetes",
@@ -29,20 +27,21 @@ export const ROUTE_TITLE: Record<Route, string> = {
   produccion: "Producción", qr: "Tarjetas QR", ocr: "Escáner OCR", facturas: "Facturación",
   reportes: "Reportes", usuarios: "Usuarios", config: "Configuración", integraciones: "Integraciones",
 };
+export const SECTION_OF: Record<Route, string> = {
+  dashboard: "Inicio", clientes: "CRM", escuelas: "CRM", docentes: "CRM", estudiantes: "CRM",
+  ventas: "CRM", cotizaciones: "CRM", paquetes: "CRM", mensajes: "CRM", sesiones: "Operaciones",
+  agenda: "Operaciones", produccion: "Operaciones", qr: "Operaciones", ocr: "Operaciones",
+  facturas: "Operaciones", reportes: "Administración", usuarios: "Administración",
+  config: "Sistema", integraciones: "Sistema",
+};
 
 interface DB {
   escuelas: Escuela[]; docentes: Docente[]; estudiantes: Estudiante[]; cotizaciones: Cotizacion[];
   sesiones: Sesion[]; eventos: Evento[]; mensajes: MensajeLog[]; usuarios: Usuario[];
-  historialTasas: HistorialTasa[]; paquetesEscuelas: PaqueteEscuela[];
-  config: Config; currentUserId: string;
-  seqPedido: number; seqCot: number;
+  historialTasas: HistorialTasa[]; paquetesEscuelas: PaqueteEscuela[]; config: Config;
+  currentUserId: string; seqPedido: number; seqCot: number;
 }
-
-interface Tasa {
-  usd: number; eur: number; compra: number; venta: number; paralelo: number;
-  updated: number; source: "api" | "manual" | "respaldo"; apiOk: boolean; fechaApi: string;
-}
-
+interface Tasa { usd: number; eur: number; compra: number; venta: number; paralelo: number; updated: number; source: "api" | "manual" | "respaldo"; apiOk: boolean; fechaApi: string; }
 interface ConfirmOpts { title: string; message: string; confirmText?: string; danger?: boolean; }
 interface ToastItem { id: string; text: string; tone: "ok" | "warn" | "err" }
 
@@ -51,24 +50,10 @@ const seedDB = (): DB => ({
   cotizaciones: SEED_COTIZACIONES, sesiones: SEED_SESIONES, eventos: SEED_EVENTOS,
   mensajes: [], usuarios: SEED_USUARIOS, historialTasas: SEED_HISTORIAL,
   paquetesEscuelas: SEED_PAQUETES_ESCUELAS, config: SEED_CONFIG,
-  currentUserId: "u1", seqPedido: 2411, seqCot: 303,
+  currentUserId: "u1", seqPedido: 2405, seqCot: 302,
 });
 
-const loadDB = (): DB => {
-  try {
-    const raw = localStorage.getItem("jyg-db-v3");
-    if (raw) {
-      const d = JSON.parse(raw);
-      if (d && d.estudiantes && d.config) {
-        if (!Array.isArray(d.historialTasas)) d.historialTasas = SEED_HISTORIAL;
-        if (!Array.isArray(d.paquetesEscuelas)) d.paquetesEscuelas = SEED_PAQUETES_ESCUELAS;
-        return d as DB;
-      }
-    }
-  } catch { /* noop */ }
-  return seedDB();
-};
-
+const KEY = "jyg-crm-db-v1";
 const upsertHoy = (hist: HistorialTasa[], v: { usd: number; euro: number; paralelo: number; fuente: HistorialTasa["fuente"] }): HistorialTasa[] => {
   const hoy = todayISO();
   const existe = hist.some((h) => h.fecha === hoy);
@@ -80,29 +65,31 @@ const upsertHoy = (hist: HistorialTasa[], v: { usd: number; euro: number; parale
 
 interface Ctx {
   db: DB; route: Route; param: any; setParam: (p: any) => void; setRoute: (r: Route, p?: any) => void;
-  user: Usuario; setUser: (id: string) => void; can: (r: Route) => boolean;
-  dark: boolean; toggleDark: () => void;
   collapsed: boolean; setCollapsed: (v: boolean) => void;
   mobileNav: boolean; setMobileNav: (v: boolean) => void;
-  tasa: Tasa; refreshTasa: () => void; tasaLoading: boolean;
-  aplicarTasaManual: (usd: number, eur: number) => void;
-  deleteTasaHistorial: (id: string) => void; clearTasaHistorial: () => void;
-  confirm: (o: ConfirmOpts) => Promise<boolean>; success: (msg?: string) => void;
-  toast: (text: string, tone?: ToastItem["tone"]) => void;
+  dark: boolean; toggleDark: () => void;
+  user: Usuario; can: (r: Route) => boolean; setCurrentUser: (id: string) => void;
+  tasa: Tasa; tasaLoading: boolean; refreshTasa: () => void;
   ocrOpen: boolean; setOcrOpen: (v: boolean) => void;
   ocrDraft: OcrDraft | null; setOcrDraft: (d: OcrDraft | null) => void;
+  confirm: (o: ConfirmOpts) => Promise<boolean>;
+  confirmState: (ConfirmOpts & { resolve: (v: boolean) => void }) | null; resolveConfirm: (v: boolean) => void;
+  success: (t?: string) => void;
+  successState: { title: string; close: () => void } | null;
+  toasts: ToastItem[]; toast: (t: string, tone?: "ok" | "warn" | "err") => void;
   saveEscuela: (e: Escuela) => void; deleteEscuela: (id: string) => void;
   saveDocente: (d: Docente) => void; deleteDocente: (id: string) => void;
   saveEstudiante: (e: Estudiante) => void; deleteEstudiante: (id: string) => void;
-  addPago: (estId: string, p: Omit<Pago, "id">) => void; deletePago: (estId: string, pagoId: string) => void;
+  addPago: (estId: string, p: Pago) => void; deletePago: (estId: string, pagoId: string) => void;
   setPedidoEstado: (estId: string, estado: string) => void;
-  saveCodigos: (estId: string, c: Estudiante["codigos"]) => void;
+  saveCodigos: (estId: string, codigos: Estudiante["codigos"]) => void;
   saveCotizacion: (c: Cotizacion) => void; deleteCotizacion: (id: string) => void; convertirCotizacion: (id: string) => void;
   saveSesion: (s: Sesion) => void; deleteSesion: (id: string) => void;
   saveEvento: (e: Evento) => void; deleteEvento: (id: string) => void;
   addMensaje: (m: MensajeLog) => void;
   saveUsuario: (u: Usuario) => void; deleteUsuario: (id: string) => void;
   setConfig: (patch: Partial<Config>) => void;
+  deleteTasaHistorial: (id: string) => void; clearTasaHistorial: () => void;
   savePaqueteEscuela: (p: PaqueteEscuela) => void; deletePaqueteEscuela: (id: string) => void;
   exportBackup: () => string; importBackup: (json: string) => boolean;
   syncInfo: { last: number; ok: boolean; msg: string } | null; syncing: boolean;
@@ -112,187 +99,165 @@ interface Ctx {
   alerts: { key: string; title: string; desc: string; route: Route }[];
 }
 
-const AppCtx = createContext<Ctx>(null as any);
-export const useApp = () => useContext(AppCtx);
+const Ctx = createContext<Ctx | null>(null);
+export const useApp = () => {
+  const c = useContext(Ctx);
+  if (!c) throw new Error("useApp fuera de AppProvider");
+  return c;
+};
 
 export function AppProvider({ children }: { children: React.ReactNode }) {
-  const [db, setDb] = useState<DB>(loadDB);
-  const [route, setRouteState] = useState<Route>("dashboard");
-  const [param, setParam] = useState<any>(null);
-  const [collapsed, setCollapsed] = useState(false);
-  const [mobileNav, setMobileNav] = useState(false);
-  const [dark, setDark] = useState(() => { try { return localStorage.getItem("jyg-theme") === "dark"; } catch { return false; } });
-  const [ocrOpen, setOcrOpen] = useState(false);
-  const [ocrDraft, setOcrDraft] = useState<OcrDraft | null>(null);
-  const [tasaLoading, setTasaLoading] = useState(false);
-  const [confirmState, setConfirmState] = useState<(ConfirmOpts & { resolve: (v: boolean) => void }) | null>(null);
-  const [swalSuccess, setSwalSuccess] = useState<{ msg: string; until: number } | null>(null);
-  const [toasts, setToasts] = useState<ToastItem[]>([]);
-  const [tasa, setTasa] = useState<Tasa>({
-    usd: SEED_CONFIG.tasaFallback, eur: SEED_CONFIG.tasaManualEUR, compra: SEED_CONFIG.tasaFallback,
-    venta: SEED_CONFIG.tasaFallback, paralelo: 0, updated: Date.now() - 3600_000, source: "respaldo", apiOk: false, fechaApi: "",
+  const [db, setDb] = useState<DB>(() => {
+    try {
+      const raw = localStorage.getItem(KEY);
+      if (raw) {
+        const d = JSON.parse(raw);
+        if (d && Array.isArray(d.estudiantes) && d.config) return { ...seedDB(), ...d };
+      }
+    } catch { /* noop */ }
+    return seedDB();
   });
   const dbRef = useRef(db);
   dbRef.current = db;
+  useEffect(() => { try { localStorage.setItem(KEY, JSON.stringify(db)); } catch { /* noop */ } }, [db]);
 
-  useEffect(() => {
-    try { localStorage.setItem("jyg-db-v3", JSON.stringify(db)); } catch { /* noop */ }
-  }, [db]);
+  const [route, setRouteState] = useState<Route>("dashboard");
+  const [param, setParam] = useState<any>(null);
+  const setRoute = useCallback((r: Route, p?: any) => { setRouteState(r); setParam(p ?? null); window.scrollTo({ top: 0 }); }, []);
 
-  const mutate = useCallback((fn: (d: DB) => DB) => setDb((d) => fn(d)), []);
+  const [collapsed, setCollapsed] = useState(false);
+  const [mobileNav, setMobileNav] = useState(false);
 
-  /* ---------- Tasa del día (ve.dolarapi.com) ---------- */
+  const [dark, setDark] = useState(() => document.documentElement.classList.contains("dark"));
+  const toggleDark = useCallback(() => {
+    setDark((v) => {
+      const nv = !v;
+      document.documentElement.classList.toggle("dark", nv);
+      document.documentElement.setAttribute("data-bs-theme", nv ? "dark" : "light");
+      try { localStorage.setItem("jyg-theme", nv ? "dark" : "light"); } catch { /* noop */ }
+      return nv;
+    });
+  }, []);
+
+  const user = useMemo(() => db.usuarios.find((u) => u.id === db.currentUserId) || db.usuarios[0], [db.usuarios, db.currentUserId]);
+  const can = useCallback((r: Route) => ACCESS[user.rol].includes(r), [user]);
+  const setCurrentUser = useCallback((id: string) => setDb((d) => ({ ...d, currentUserId: id })), []);
+
+  /* ---- Tasa en vivo ---- */
+  const [tasa, setTasa] = useState<Tasa>({ usd: db.config.tasaFallback, eur: db.config.tasaManualEUR, compra: 0, venta: 0, paralelo: 0, updated: Date.now(), source: "respaldo", apiOk: false, fechaApi: "" });
+  const [tasaLoading, setTasaLoading] = useState(false);
+
   const refreshTasa = useCallback(async () => {
     const cfg = dbRef.current.config;
     if (cfg.usarTasaManual) {
-      setTasa({ usd: cfg.tasaManualUSD, eur: cfg.tasaManualEUR, compra: cfg.tasaManualUSD, venta: cfg.tasaManualUSD, paralelo: 0, updated: Date.now(), source: "manual", apiOk: false, fechaApi: "" });
+      setTasa({ usd: cfg.tasaManualUSD, eur: cfg.tasaManualEUR, compra: 0, venta: 0, paralelo: 0, updated: Date.now(), source: "manual", apiOk: false, fechaApi: "" });
       return;
     }
     if (!cfg.usarApi) {
-      setTasa({ usd: cfg.tasaFallback, eur: +(cfg.tasaFallback * 1.102).toFixed(2), compra: cfg.tasaFallback, venta: cfg.tasaFallback, paralelo: 0, updated: Date.now(), source: "respaldo", apiOk: false, fechaApi: "" });
+      setTasa({ usd: cfg.tasaFallback, eur: cfg.tasaManualEUR, compra: 0, venta: 0, paralelo: 0, updated: Date.now(), source: "respaldo", apiOk: false, fechaApi: "" });
       return;
     }
     setTasaLoading(true);
     try {
-      const [rUsd, rEur] = await Promise.all([
-        fetch(API_DOLARES).then((r) => (r.ok ? r.json() : null)).catch(() => null),
-        fetch(API_EUROS).then((r) => (r.ok ? r.json() : null)).catch(() => null),
-      ]);
-      /* Formato: [{ moneda, fuente, nombre, compra, venta, promedio, fechaActualizacion }] */
-      const pick = (arr: any, moneda: string) => {
-        if (!Array.isArray(arr)) return null;
-        const item = arr.find((x: any) => String(x?.moneda || "").toUpperCase() === moneda) || arr.find((x: any) => String(x?.fuente || "").toLowerCase() === "oficial") || arr[0];
-        if (!item) return null;
-        const prom = Number(item.promedio ?? item.venta ?? item.compra);
-        if (!isFinite(prom) || prom <= 0) return null;
-        return {
-          prom: +prom.toFixed(2),
-          compra: Number(item.compra) || +prom.toFixed(2),
-          venta: Number(item.venta) || +prom.toFixed(2),
-          paralelo: (() => { const p = arr.find((x: any) => String(x?.fuente || "").toLowerCase() === "paralelo"); const pv = Number(p?.promedio ?? p?.venta); return isFinite(pv) && pv > 0 ? +pv.toFixed(2) : 0; })(),
-          fecha: String(item.fechaActualizacion || ""),
-        };
-      };
-      const u = pick(rUsd, "USD");
-      const e = pick(rEur, "EUR");
-      if (u) {
-        setTasa({ usd: u.prom, eur: e?.prom || 0, compra: u.compra, venta: u.venta, paralelo: u.paralelo, updated: Date.now(), source: "api", apiOk: true, fechaApi: u.fecha });
-        setDb((d) => ({
-          ...d,
-          config: { ...d.config, tasaFallback: u.prom },
-          historialTasas: d.config.historialAuto ? upsertHoy(d.historialTasas, { usd: u.prom, euro: e?.prom || 0, paralelo: u.paralelo, fuente: "dolarapi" }) : d.historialTasas,
-        }));
-      } else {
-        setTasa((t) => ({ ...t, updated: Date.now(), source: "respaldo", apiOk: false }));
-      }
-    } finally {
-      setTasaLoading(false);
-    }
+      const [rUsd, rEur] = await Promise.all([fetch(API_DOLARES), fetch(API_EUROS)]);
+      const jUsd: any[] = await rUsd.json();
+      const jEur: any[] = await rEur.json();
+      const usd = (Array.isArray(jUsd) ? jUsd : [jUsd]).find((x) => (x.moneda || x.casa) === "USD") || jUsd[0] || {};
+      const eur = (Array.isArray(jEur) ? jEur : [jEur]).find((x) => (x.moneda || x.casa) === "EUR") || jEur[0] || {};
+      const usdVal = usd.promedio || usd.venta || 0;
+      const eurVal = eur.promedio || eur.venta || 0;
+      if (!usdVal) throw new Error("sin datos");
+      const fechaApi = usd.fechaActualizacion || usd.fechaActualiza || "";
+      setTasa({ usd: usdVal, eur: eurVal, compra: usd.compra || 0, venta: usd.venta || 0, paralelo: 0, updated: Date.now(), source: "api", apiOk: true, fechaApi });
+      setDb((d) => ({ ...d, historialTasas: upsertHoy(d.historialTasas, { usd: usdVal, euro: eurVal, paralelo: 0, fuente: "dolarapi" }) }));
+    } catch {
+      setTasa((t) => ({ ...t, source: "respaldo", apiOk: false }));
+    } finally { setTasaLoading(false); }
   }, []);
 
-  useEffect(() => { void refreshTasa(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
-  useEffect(() => {
-    const iv = setInterval(() => void refreshTasa(), 5 * 60_000);
-    const onVis = () => { if (!document.hidden) void refreshTasa(); };
-    document.addEventListener("visibilitychange", onVis);
-    return () => { clearInterval(iv); document.removeEventListener("visibilitychange", onVis); };
-  }, [refreshTasa]);
+  useEffect(() => { void refreshTasa(); const iv = setInterval(() => void refreshTasa(), 5 * 60 * 1000); return () => clearInterval(iv); }, [refreshTasa]);
 
-  const aplicarTasaManual = useCallback((usd: number, eur: number) => {
-    setTasa({ usd, eur, compra: usd, venta: usd, paralelo: 0, updated: Date.now(), source: "manual", apiOk: false, fechaApi: "" });
-    setDb((d) => ({
-      ...d,
-      config: { ...d.config, usarTasaManual: true, usarApi: false, tasaManualUSD: usd, tasaManualEUR: eur, tasaFallback: usd },
-      historialTasas: upsertHoy(d.historialTasas, { usd, euro: eur, paralelo: 0, fuente: "manual" }),
-    }));
-  }, []);
+  /* ---- OCR ---- */
+  const [ocrOpen, setOcrOpen] = useState(false);
+  const [ocrDraft, setOcrDraft] = useState<OcrDraft | null>(null);
 
-  /* ---------- Confirmaciones / toasts ---------- */
+  /* ---- Confirm / success / toasts ---- */
+  const [confirmState, setConfirmState] = useState<(ConfirmOpts & { resolve: (v: boolean) => void }) | null>(null);
   const confirm = useCallback((o: ConfirmOpts) => new Promise<boolean>((resolve) => setConfirmState({ ...o, resolve })), []);
-  const success = useCallback((msg = "Registro guardado correctamente") => {
-    setSwalSuccess({ msg, until: Date.now() + 1700 });
-    setTimeout(() => setSwalSuccess(null), 1750);
+  const resolveConfirm = useCallback((v: boolean) => { confirmState?.resolve(v); setConfirmState(null); }, [confirmState]);
+
+  const [successState, setSuccessState] = useState<{ title: string; close: () => void } | null>(null);
+  const success = useCallback((t?: string) => {
+    const item = { title: t || "Registro guardado correctamente", close: () => setSuccessState(null) };
+    setSuccessState(item);
+    setTimeout(() => setSuccessState((s) => (s === item ? null : s)), 1800);
   }, []);
-  const toast = useCallback((text: string, tone: ToastItem["tone"] = "ok") => {
+
+  const [toasts, setToasts] = useState<ToastItem[]>([]);
+  const toast = useCallback((text: string, tone: "ok" | "warn" | "err" = "ok") => {
     const id = uid();
     setToasts((t) => [...t, { id, text, tone }]);
     setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 3200);
   }, []);
 
-  /* ---------- Acciones ---------- */
-  const setRoute = useCallback((r: Route, p?: any) => { setRouteState(r); setParam(p || null); setMobileNav(false); window.scrollTo({ top: 0 }); }, []);
+  /* ---- Mutadores ---- */
+  const mutate = useCallback((fn: (d: DB) => DB) => setDb((d) => fn(d)), []);
+  const upsert = <T extends { id: string }>(arr: T[], item: T): T[] => arr.some((x) => x.id === item.id) ? arr.map((x) => (x.id === item.id ? item : x)) : [...arr, item];
 
-  const saveEscuela = useCallback((e: Escuela) => mutate((d) => ({ ...d, escuelas: d.escuelas.some((x) => x.id === e.id) ? d.escuelas.map((x) => (x.id === e.id ? e : x)) : [...d.escuelas, e] })), [mutate]);
+  const saveEscuela = useCallback((e: Escuela) => mutate((d) => ({ ...d, escuelas: upsert(d.escuelas, e) })), [mutate]);
   const deleteEscuela = useCallback((id: string) => mutate((d) => ({ ...d, escuelas: d.escuelas.filter((x) => x.id !== id) })), [mutate]);
-  const saveDocente = useCallback((t: Docente) => mutate((d) => ({ ...d, docentes: d.docentes.some((x) => x.id === t.id) ? d.docentes.map((x) => (x.id === t.id ? t : x)) : [...d.docentes, t] })), [mutate]);
+  const saveDocente = useCallback((e: Docente) => mutate((d) => ({ ...d, docentes: upsert(d.docentes, e) })), [mutate]);
   const deleteDocente = useCallback((id: string) => mutate((d) => ({ ...d, docentes: d.docentes.filter((x) => x.id !== id) })), [mutate]);
-
   const saveEstudiante = useCallback((e: Estudiante) => mutate((d) => {
     const existe = d.estudiantes.some((x) => x.id === e.id);
-    let seq = d.seqPedido;
-    const est = existe ? e : { ...e, pedido: e.pedido || `PD-${seq++}` };
-    return { ...d, estudiantes: existe ? d.estudiantes.map((x) => (x.id === e.id ? est : x)) : [est, ...d.estudiantes], seqPedido: seq };
+    return {
+      ...d,
+      estudiantes: upsert(d.estudiantes, { ...e, id: e.id || uid() }),
+      seqPedido: existe ? d.seqPedido : d.seqPedido + 1,
+    };
   }), [mutate]);
   const deleteEstudiante = useCallback((id: string) => mutate((d) => ({ ...d, estudiantes: d.estudiantes.filter((x) => x.id !== id) })), [mutate]);
-
-  const addPago = useCallback((estId: string, p: Omit<Pago, "id">) => mutate((d) => ({
-    ...d,
-    estudiantes: d.estudiantes.map((e) => (e.id === estId ? { ...e, pagos: [...e.pagos, { ...p, id: uid() }] } : e)),
-  })), [mutate]);
-  const deletePago = useCallback((estId: string, pagoId: string) => mutate((d) => ({
-    ...d,
-    estudiantes: d.estudiantes.map((e) => (e.id === estId ? { ...e, pagos: e.pagos.filter((p) => p.id !== pagoId) } : e)),
-  })), [mutate]);
-  const setPedidoEstado = useCallback((estId: string, estado: string) => mutate((d) => ({
-    ...d,
-    estudiantes: d.estudiantes.map((e) => (e.id === estId ? { ...e, estadoPedido: estado, fechaEntrega: estado === "Entregado" ? (e.fechaEntrega || todayISO()) : e.fechaEntrega } : e)),
-  })), [mutate]);
-  const saveCodigos = useCallback((estId: string, c: Estudiante["codigos"]) => mutate((d) => ({
-    ...d, estudiantes: d.estudiantes.map((e) => (e.id === estId ? { ...e, codigos: c } : e)),
-  })), [mutate]);
-
+  const addPago = useCallback((estId: string, p: Pago) => mutate((d) => ({ ...d, estudiantes: d.estudiantes.map((e) => (e.id === estId ? { ...e, pagos: [...e.pagos, p] } : e)) })), [mutate]);
+  const deletePago = useCallback((estId: string, pagoId: string) => mutate((d) => ({ ...d, estudiantes: d.estudiantes.map((e) => (e.id === estId ? { ...e, pagos: e.pagos.filter((x) => x.id !== pagoId) } : e)) })), [mutate]);
+  const setPedidoEstado = useCallback((estId: string, estado: string) => mutate((d) => ({ ...d, estudiantes: d.estudiantes.map((e) => (e.id === estId ? { ...e, estadoPedido: estado, fechaEntrega: estado === "Entregado" ? todayISO() : e.fechaEntrega } : e)) })), [mutate]);
+  const saveCodigos = useCallback((estId: string, codigos: Estudiante["codigos"]) => mutate((d) => ({ ...d, estudiantes: d.estudiantes.map((e) => (e.id === estId ? { ...e, codigos } : e)) })), [mutate]);
   const saveCotizacion = useCallback((c: Cotizacion) => mutate((d) => {
     const existe = d.cotizaciones.some((x) => x.id === c.id);
-    let seq = d.seqCot;
-    const cot = existe ? c : { ...c, numero: c.numero || `COT-0${seq++}` };
-    return { ...d, cotizaciones: existe ? d.cotizaciones.map((x) => (x.id === c.id ? cot : x)) : [cot, ...d.cotizaciones], seqCot: seq };
+    return { ...d, cotizaciones: upsert(d.cotizaciones, c), seqCot: existe ? d.seqCot : d.seqCot + 1 };
   }), [mutate]);
   const deleteCotizacion = useCallback((id: string) => mutate((d) => ({ ...d, cotizaciones: d.cotizaciones.filter((x) => x.id !== id) })), [mutate]);
   const convertirCotizacion = useCallback((id: string) => mutate((d) => {
     const c = d.cotizaciones.find((x) => x.id === id);
     if (!c) return d;
-    const seq = d.seqPedido;
+    const escuela = d.escuelas.find((e) => e.nombre === c.escuela);
     const nuevo: Estudiante = {
-      id: uid(), nombre: c.cliente, telefono: c.telefono, representante: c.cliente, ci: "",
-      escuelaId: d.escuelas.find((e) => e.nombre === c.escuela)?.id || d.escuelas[0]?.id || "", docenteId: "",
-      grado: "Sexto Grado", seccion: "A", paqueteId: c.paqueteId,
-      precioPaquete: d.config.preciosPaquetes.includes(0) ? 0 : (PAQ_BASE[c.paqueteId] || 40),
-      adicionales: c.adicionales, pagos: [], estadoPedido: "Registrado", fechaRegistro: todayISO(),
-      fechaEntrega: "", pedido: `PD-${seq}`, observaciones: `Convertida de ${c.numero}`, codigos: { carnetAlumno: "", carnetRep: "", firmaLibro: "", togaBirrete: "", fotoLibre: "", fotoAdicional: "" },
+      id: uid(), pedido: `P-${d.seqPedido}`, nombre: c.cliente, telefono: c.telefono, representante: c.cliente, ci: "",
+      escuelaId: escuela?.id || "", docenteId: "", grado: "Bachiller", seccion: "A", paqueteId: c.paqueteId,
+      precioPaquete: ( { basico: 20, premium: 40, lujo: 60 } as Record<string, number>)[c.paqueteId] || 40,
+      adicionales: c.adicionales, pagos: [], estadoPedido: "Registrado", fechaRegistro: todayISO(), fechaEntrega: "",
+      observaciones: `Convertida de ${c.numero}`, codigos: { carnetAlumno: "", carnetRep: "", firmaLibro: "", togaBirrete: "", fotoLibre: "", fotoAdicional: "" },
     };
     return {
-      ...d, seqPedido: seq + 1,
-      estudiantes: [nuevo, ...d.estudiantes],
+      ...d,
+      estudiantes: [...d.estudiantes, nuevo],
       cotizaciones: d.cotizaciones.map((x) => (x.id === id ? { ...x, estado: "Aceptada" as const } : x)),
+      seqPedido: d.seqPedido + 1,
     };
   }), [mutate]);
-
-  const saveSesion = useCallback((s: Sesion) => mutate((d) => ({ ...d, sesiones: d.sesiones.some((x) => x.id === s.id) ? d.sesiones.map((x) => (x.id === s.id ? s : x)) : [...d.sesiones, s] })), [mutate]);
+  const saveSesion = useCallback((s: Sesion) => mutate((d) => ({ ...d, sesiones: upsert(d.sesiones, s) })), [mutate]);
   const deleteSesion = useCallback((id: string) => mutate((d) => ({ ...d, sesiones: d.sesiones.filter((x) => x.id !== id) })), [mutate]);
-  const saveEvento = useCallback((e: Evento) => mutate((d) => ({ ...d, eventos: d.eventos.some((x) => x.id === e.id) ? d.eventos.map((x) => (x.id === e.id ? e : x)) : [...d.eventos, e] })), [mutate]);
+  const saveEvento = useCallback((e: Evento) => mutate((d) => ({ ...d, eventos: upsert(d.eventos, e) })), [mutate]);
   const deleteEvento = useCallback((id: string) => mutate((d) => ({ ...d, eventos: d.eventos.filter((x) => x.id !== id) })), [mutate]);
   const addMensaje = useCallback((m: MensajeLog) => mutate((d) => ({ ...d, mensajes: [m, ...d.mensajes] })), [mutate]);
-  const saveUsuario = useCallback((u: Usuario) => mutate((d) => ({ ...d, usuarios: d.usuarios.some((x) => x.id === u.id) ? d.usuarios.map((x) => (x.id === u.id ? u : x)) : [...d.usuarios, u] })), [mutate]);
+  const saveUsuario = useCallback((u: Usuario) => mutate((d) => ({ ...d, usuarios: upsert(d.usuarios, u) })), [mutate]);
   const deleteUsuario = useCallback((id: string) => mutate((d) => ({ ...d, usuarios: d.usuarios.filter((x) => x.id !== id) })), [mutate]);
+  const deleteTasaHistorial = useCallback((id: string) => mutate((d) => ({ ...d, historialTasas: d.historialTasas.filter((x) => x.id !== id) })), [mutate]);
+  const clearTasaHistorial = useCallback(() => mutate((d) => ({ ...d, historialTasas: [] })), [mutate]);
   const setConfig = useCallback((patch: Partial<Config>) => mutate((d) => ({ ...d, config: { ...d.config, ...patch } })), [mutate]);
-
-  /* Paquetes asignados a escuelas */
-  const savePaqueteEscuela = useCallback((p: PaqueteEscuela) => mutate((d) => ({ ...d, paquetesEscuelas: d.paquetesEscuelas.some((x) => x.id === p.id) ? d.paquetesEscuelas.map((x) => (x.id === p.id ? p : x)) : [...d.paquetesEscuelas, p] })), [mutate]);
+  const savePaqueteEscuela = useCallback((p: PaqueteEscuela) => mutate((d) => ({ ...d, paquetesEscuelas: upsert(d.paquetesEscuelas, p) })), [mutate]);
   const deletePaqueteEscuela = useCallback((id: string) => mutate((d) => ({ ...d, paquetesEscuelas: d.paquetesEscuelas.filter((x) => x.id !== id) })), [mutate]);
-  const deleteTasaHistorial = useCallback((id: string) => setDb((d) => ({ ...d, historialTasas: d.historialTasas.filter((h) => h.id !== id) })), []);
-  const clearTasaHistorial = useCallback(() => setDb((d) => ({ ...d, historialTasas: [] })), []);
 
-  const exportBackup = useCallback(() => JSON.stringify(dbRef.current, null, 2), []);
+  const exportBackup = useCallback(() => JSON.stringify(dbRef.current), []);
   const importBackup = useCallback((json: string) => {
     try {
       const d = JSON.parse(json);
@@ -302,43 +267,43 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     } catch { return false; }
   }, []);
 
-  /* ---------- Base de datos en la nube (Supabase · PostgreSQL) ---------- */
+  /* ---- Nube (Supabase, carga diferida) ---- */
   const [syncInfo, setSyncInfo] = useState<{ last: number; ok: boolean; msg: string } | null>(null);
   const [syncing, setSyncing] = useState(false);
-
   const clienteSb = useCallback(async (urlArg?: string, keyArg?: string) => {
     const c = dbRef.current.config;
-    const url = urlArg ?? c.supabaseUrl;
-    const key = keyArg ?? c.supabaseKey;
+    const url = urlArg || c.supabaseUrl;
+    const key = keyArg || c.supabaseKey;
     if (!url || !key) return null;
+    const { sbClient } = await import("./supabase");
     return sbClient(url, key);
   }, []);
-
-  const testCloud = useCallback(async (urlArg?: string, keyArg?: string): Promise<{ tablas: number; filas: number }> => {
+  const testCloud = useCallback(async (urlArg?: string, keyArg?: string) => {
     const client = await clienteSb(urlArg, keyArg);
     if (!client) throw new Error("Faltan la URL del proyecto o la anon key de Supabase");
+    const { probarConexion } = await import("./supabase");
     return probarConexion(client);
   }, [clienteSb]);
-
-  const syncToCloud = useCallback(async (onTabla?: (t: string, s: "busy" | "ok" | "err", f?: number) => void): Promise<boolean> => {
+  const syncToCloud = useCallback(async (onTabla?: (t: string, s: "busy" | "ok" | "err", f?: number) => void) => {
     const client = await clienteSb();
     if (!client) { setSyncInfo({ last: Date.now(), ok: false, msg: "Configura la URL y la anon key de Supabase en Integraciones" }); return false; }
     setSyncing(true);
     try {
+      const { subirTodo } = await import("./supabase");
       await subirTodo(client, dbRef.current, onTabla);
-      setSyncInfo({ last: Date.now(), ok: true, msg: "Base de datos subida a Supabase (13 tablas sincronizadas)" });
+      setSyncInfo({ last: Date.now(), ok: true, msg: "Base de datos subida a Supabase (14 tablas sincronizadas)" });
       return true;
     } catch (e: any) {
       setSyncInfo({ last: Date.now(), ok: false, msg: `Error al subir: ${e.message}` });
       return false;
     } finally { setSyncing(false); }
   }, [clienteSb]);
-
-  const restoreFromCloud = useCallback(async (): Promise<boolean> => {
+  const restoreFromCloud = useCallback(async () => {
     const client = await clienteSb();
     if (!client) { setSyncInfo({ last: Date.now(), ok: false, msg: "Configura la URL y la anon key de Supabase" }); return false; }
     setSyncing(true);
     try {
+      const { descargarTodo, rowsToDb } = await import("./supabase");
       const rows = await descargarTodo(client);
       const nuevo = rowsToDb(rows, dbRef.current);
       setDb({ ...seedDB(), ...nuevo });
@@ -350,119 +315,31 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     } finally { setSyncing(false); }
   }, [clienteSb]);
 
-  /* Auto-sincronización: 2.5 s después de cada cambio, si está activada */
-  useEffect(() => {
-    if (!db.config.autoSyncCloud || !db.config.supabaseUrl || !db.config.supabaseKey) return;
-    const t = setTimeout(() => { void syncToCloud(); }, 2500);
-    return () => clearTimeout(t);
-  }, [db, db.config.autoSyncCloud, db.config.supabaseUrl, db.config.supabaseKey, syncToCloud]);
-
-
-
-  const toggleDark = useCallback(() => setDark((v) => !v), []);
-  useEffect(() => {
-    document.documentElement.classList.toggle("dark", dark);
-    try { localStorage.setItem("jyg-theme", dark ? "dark" : "light"); } catch { /* noop */ }
-  }, [dark]);
-
-  const user = db.usuarios.find((u) => u.id === db.currentUserId) || db.usuarios[0];
-  const can = useCallback((r: Route) => ACCESS[user?.rol || "admin"].includes(r), [user]);
-
-  /* Alertas */
+  /* ---- Alertas del dashboard / notificaciones ---- */
   const alerts = useMemo(() => {
-    const pend = db.estudiantes.filter((e) => estudianteTotales(e).saldo > 0.009).length;
-    const sinFoto = db.estudiantes.filter((e) => e.estadoPedido !== "Entregado" && !Object.values(e.codigos).every((c) => c.trim() !== "")).length;
+    const a: { key: string; title: string; desc: string; route: Route }[] = [];
+    const pendientes = db.estudiantes.filter((e) => {
+      const t = e.pagos.reduce((s, p) => s + p.usd, 0);
+      return e.precioPaquete + e.adicionales.reduce((s, x) => s + x.cantidad * x.precio, 0) - t > 0.009;
+    }).length;
+    if (pendientes > 0) a.push({ key: "pagos", title: "Pagos pendientes", desc: `${pendientes} estudiantes con saldo por cobrar`, route: "facturas" });
+    const sinFoto = db.estudiantes.filter((e) => e.estadoPedido !== "Entregado" && Object.values(e.codigos).some((c) => !c)).length;
+    if (sinFoto > 0) a.push({ key: "fotos", title: "Pedidos sin fotografías", desc: `${sinFoto} pedidos con códigos de foto incompletos`, route: "produccion" });
     const listos = db.estudiantes.filter((e) => e.estadoPedido === "Empaque").length;
-    const out: Ctx["alerts"] = [];
-    if (pend) out.push({ key: "pagos", title: `${pend}`, desc: "estudiantes con pagos pendientes", route: "estudiantes" });
-    if (sinFoto) out.push({ key: "fotos", title: `${sinFoto}`, desc: "pedidos sin códigos de fotografía", route: "produccion" });
-    if (listos) out.push({ key: "entrega", title: `${listos}`, desc: "pedidos listos para entregar", route: "ventas" });
-    return out;
+    if (listos > 0) a.push({ key: "entrega", title: "Listos para entregar", desc: `${listos} pedidos en empaque esperando entrega`, route: "ventas" });
+    return a;
   }, [db.estudiantes]);
 
-  const ctx: Ctx = {
-    db, route, param, setParam, setRoute, user, setUser: (id) => mutate((d) => ({ ...d, currentUserId: id })), can,
-    dark, toggleDark, collapsed, setCollapsed, mobileNav, setMobileNav,
-    tasa, refreshTasa: () => void refreshTasa(), tasaLoading,
-    aplicarTasaManual, deleteTasaHistorial, clearTasaHistorial,
-    confirm, success, toast, ocrOpen, setOcrOpen, ocrDraft, setOcrDraft,
+  const value: Ctx = {
+    db, route, param, setParam, setRoute, collapsed, setCollapsed, mobileNav, setMobileNav,
+    dark, toggleDark, user, can, setCurrentUser, tasa, tasaLoading, refreshTasa,
+    ocrOpen, setOcrOpen, ocrDraft, setOcrDraft, confirm, confirmState, resolveConfirm,
+    success, successState, toasts, toast,
     saveEscuela, deleteEscuela, saveDocente, deleteDocente, saveEstudiante, deleteEstudiante,
-    addPago, deletePago, setPedidoEstado, saveCodigos,
-    saveCotizacion, deleteCotizacion, convertirCotizacion,
-    saveSesion, deleteSesion, saveEvento, deleteEvento, addMensaje,
-    saveUsuario, deleteUsuario, setConfig,
-    savePaqueteEscuela, deletePaqueteEscuela,
-    exportBackup, importBackup,
+    addPago, deletePago, setPedidoEstado, saveCodigos, saveCotizacion, deleteCotizacion, convertirCotizacion,
+    saveSesion, deleteSesion, saveEvento, deleteEvento, addMensaje, saveUsuario, deleteUsuario,
+    setConfig, deleteTasaHistorial, clearTasaHistorial, savePaqueteEscuela, deletePaqueteEscuela, exportBackup, importBackup,
     syncInfo, syncing, testCloud, syncToCloud, restoreFromCloud, alerts,
   };
-
-  return (
-    <AppCtx.Provider value={ctx}>
-      {children}
-      <ConfirmLayer state={confirmState} setState={setConfirmState} />
-      <SuccessLayer swal={swalSuccess} />
-      <ToastLayer toasts={toasts} />
-    </AppCtx.Provider>
-  );
-}
-
-const PAQ_BASE: Record<string, number> = { basico: 20, premium: 40, lujo: 60 };
-
-/* Capas UI de confirmación / éxito / toasts */
-function ConfirmLayer({ state, setState }: { state: any; setState: (v: any) => void }) {
-  if (!state) return null;
-  const close = (v: boolean) => { state.resolve(v); setState(null); };
-  return (
-    <div className="overlay" style={{ zIndex: 5000 }}>
-      <div className="modal" style={{ maxWidth: 420, textAlign: "center" }}>
-        <div className="swal-icon" style={{ background: state.danger ? "var(--red-tint)" : "var(--blue-tint-2)", color: state.danger ? "var(--red)" : "var(--blue)" }}>
-          <svg width="38" height="38" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-            {state.danger
-              ? <><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" /><line x1="12" y1="9" x2="12" y2="13" /><line x1="12" y1="17" x2="12.01" y2="17" /></>
-              : <><circle cx="12" cy="12" r="10" /><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" /><line x1="12" y1="17" x2="12.01" y2="17" /></>}
-          </svg>
-        </div>
-        <h3 className="font-display" style={{ fontSize: 19, margin: "0 0 8px" }}>{state.title}</h3>
-        <p style={{ color: "var(--ink-soft)", fontSize: 13.5, margin: "0 26px 22px" }}>{state.message}</p>
-        <div style={{ display: "flex", gap: 10, justifyContent: "center", paddingBottom: 26 }}>
-          <button className="btn btn-ghost" onClick={() => close(false)}>Cancelar</button>
-          <button className="btn" style={{ background: state.danger ? "var(--red)" : "var(--green)", color: "#fff" }} onClick={() => close(true)}>
-            {state.confirmText || "Aceptar"}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function SuccessLayer({ swal }: { swal: { msg: string; until: number } | null }) {
-  if (!swal) return null;
-  return (
-    <div className="overlay" style={{ zIndex: 5100, pointerEvents: "none" }}>
-      <div className="modal" style={{ maxWidth: 400, textAlign: "center" }}>
-        <div className="swal-icon" style={{ background: "var(--green-tint)", color: "var(--green)" }}>
-          <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" /><polyline points="22 4 12 14.01 9 11.01" />
-          </svg>
-        </div>
-        <h3 className="font-display" style={{ fontSize: 18, margin: "0 0 6px" }}>{swal.msg}</h3>
-        <p style={{ color: "var(--ink-faint)", fontSize: 12.5, margin: 0, paddingBottom: 26 }}>La información quedó registrada en el sistema.</p>
-      </div>
-    </div>
-  );
-}
-
-function ToastLayer({ toasts }: { toasts: ToastItem[] }) {
-  if (!toasts.length) return null;
-  const colors: Record<string, string> = { ok: "var(--green)", warn: "var(--amber)", err: "var(--red)" };
-  return (
-    <div className="toast-wrap">
-      {toasts.map((t) => (
-        <div key={t.id} className="toast">
-          <span style={{ width: 8, height: 8, borderRadius: 99, background: colors[t.tone], flexShrink: 0 }} />
-          {t.text}
-        </div>
-      ))}
-    </div>
-  );
+  return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
