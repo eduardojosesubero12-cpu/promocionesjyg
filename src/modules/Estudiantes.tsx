@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import {
-  Banknote, Check, CreditCard, Eye, GraduationCap, ImagePlus, Package, Plus,
+  Banknote, Check, CreditCard, Eye, FileText, GraduationCap, ImagePlus, Package, Plus,
   QrCode, Receipt, ScanLine, Trash2, Users, Wallet, X,
 } from "lucide-react";
 import { useApp } from "../lib/store";
@@ -119,7 +119,7 @@ export default function Estudiantes() {
 
       {formOpen && <EstudianteForm initial={formOpen} onClose={() => { setFormOpen(null); if (param?.openNew) setParam(null); }} />}
       {abiertos.map((e) => (
-        <Expediente key={e.id} est={e} onClose={() => { setOpenId(null); if (param?.open) setParam(null); }} tasaUsd={tasa.usd} />
+        <Expediente key={e.id} est={e} onClose={() => { setOpenId(null); if (param?.open) setParam(null); }} tasaUsd={tasa.usd} onEditar={() => setFormOpen(e)} />
       ))}
       <span className="d-none"><CreditCard size={1} /></span>
     </div>
@@ -218,7 +218,7 @@ function EstudianteForm({ initial, onClose }: { initial: Partial<Estudiante>; on
 }
 
 /* ---------------- Expediente (Drawer de vidrio) ---------------- */
-function Expediente({ est, onClose, tasaUsd }: { est: Estudiante; onClose: () => void; tasaUsd: number }) {
+function Expediente({ est, onClose, tasaUsd, onEditar }: { est: Estudiante; onClose: () => void; tasaUsd: number; onEditar?: () => void }) {
   const { db, saveEstudiante, deletePago, setPedidoEstado, saveCodigos, confirm, success, toast, addPago, tasa } = useApp();
   const [tab, setTab] = useState<"datos" | "pagos" | "pedido" | "qr">("datos");
   const [vistaQr, setVistaQr] = useState<"tarjeta" | "credencial">("tarjeta");
@@ -262,6 +262,16 @@ function Expediente({ est, onClose, tasaUsd }: { est: Estudiante; onClose: () =>
 
   return (
     <Drawer open onClose={onClose} title={<span className="d-flex align-items-center gap-2"><span className="d-flex align-items-center justify-content-center rounded-3 font-display fw-bold" style={{ width: 34, height: 34, background: "var(--tint-navy-2)", color: "var(--jyg-navy)" }}>{est.nombre[0]}</span>{est.nombre} <Badge tone="blue">{est.pedido}</Badge></span>}>
+      {onEditar && (
+        <div className="d-flex justify-content-between align-items-center gap-2 mb-3">
+          <span className="text-truncate" style={{ fontSize: 12, color: "var(--ink-faint)" }}>
+            {est.grado} “{est.seccion}” · {db.escuelas.find((x) => x.id === est.escuelaId)?.nombre || "Escuela sin asignar"}
+          </span>
+          <button className="btn btn-soft btn-sm flex-shrink-0" onClick={onEditar} title="Abrir el formulario de registro del estudiante">
+            <FileText size={14} /> Ver formulario
+          </button>
+        </div>
+      )}
       <div className="d-flex gap-1 mb-3 rounded-3 p-1" style={{ background: "var(--tint-slate)" }}>
         {TABS.map((tb) => (
           <button key={tb.id} onClick={() => setTab(tb.id)} className="btn btn-sm border-0 flex-fill font-display fw-semibold" style={{ background: tab === tb.id ? "var(--card-bg)" : "transparent", color: tab === tb.id ? "var(--jyg-navy)" : "var(--ink-soft)", boxShadow: tab === tb.id ? "var(--shadow-1)" : "none" }}>
