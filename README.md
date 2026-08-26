@@ -68,9 +68,17 @@ El script:
 ## 🗂️ Estructura
 
 ```
-src/
-├── components/   # Shell (sidebar + navbar) y UI compartida (modal, tablas, alertas)
-├── lib/          # data.ts (catálogos), store.tsx (estado global), supabase.ts
-├── modules/      # Las 19 páginas del CRM
-└── App.tsx       # Router + ErrorBoundary
+├── index.html        # Punto de entrada (Bootstrap 5 + boxicons CDN + Poppins/Lato)
+├── style.css         # Diseño original de la plantilla (sidebar cóncavo, navbar, tablas)
+├── script.js         # Comportamiento original de la plantilla (menú, búsqueda, modo oscuro)
+├── publicar-github.sh / .ps1   # Publicación en GitHub con historial limpio
+└── src/
+    ├── components/   # Shell (sidebar + navbar) y UI compartida (modal, tablas, alertas)
+    ├── lib/          # data.ts (catálogos), store.tsx (estado global), supabase.ts
+    ├── modules/      # Las 19 páginas del CRM
+    └── App.tsx       # Router + ErrorBoundary
 ```
+
+> **Nota:** `style.css` y `script.js` son los archivos de la plantilla original de diseño
+> (sidebar con curvas cóncavas, navbar, tablas y modo oscuro). La app React los replica en
+> `src/index.css` y `src/components/Shell.tsx` para mantener ese lenguaje visual en todo el CRM.
