@@ -113,7 +113,8 @@ export const API_EUROS = "https://ve.dolarapi.com/v1/euros";
 export const OCR_CRED = {
   correo: "ocr-esca@thermal-scene-505819-t0.iam.gserviceaccount.com",
   id: "104968516099790647092",
-  clave: "a1d27bff3a54da57c82e09ab6aed9ecd6d3e3901",
+  /* ⚠️ La clave es un secreto: se guarda en el navegador desde Configuración, no en el código. */
+  clave: "",
 };
 
 export const PLANTILLAS_MENSAJE = [
