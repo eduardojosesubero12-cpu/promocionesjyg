@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+# ============================================================
+#  pre-commit — escanea los cambios staged contra secretos.
+#  Se activa automáticamente con: git config core.hooksPath .githooks
+#  (el script publicar-github.sh lo configura por ti)
+# ============================================================
+PATRONES='sk-or-v1-[a-z0-9]{20,}|sk-[a-zA-Z0-9]{32,}|a1d27bff3a54da57c82e09ab6aed9ecd6d3e3901|eyJhbGciOi[A-Za-z0-9_-]{20,}|AKIA[0-9A-Z]{16}|ghp_[A-Za-z0-9]{30,}|xox[baprs]-[A-Za-z0-9-]{10,}'
+
+# Archivos del commit actual (excluye binarios)
+ARCHIVOS=$(git diff --cached --name-only --diff-filter=ACM | grep -Ev '\.(png|jpe?g|gif|webp|ico|woff2?|ttf|eot|mp4|pdf)$' || true)
+
+if [ -z "$ARCHIVOS" ]; then
+  exit 0
+fi
+
+HITS=$(git grep -InE "$PATRONES" -- $ARCHIVOS 2>/dev/null || true)
+
+if [ -n "$HITS" ]; then
+  echo ""
+  echo "🛑 COMMIT BLOQUEADO — se detectaron posibles secretos:"
+  echo ""
+  echo "$HITS" | sed 's/^/   /'
+  echo ""
+  echo "   Los secretos no deben vivir en el código."
+  echo "   Configúralos desde el CRM (Configuración) — se guardan en el navegador."
+  echo ""
+  echo "   Si es un falso positivo, puedes forzar con: git commit --no-verify"
+  exit 1
+fi
+
+exit 0
