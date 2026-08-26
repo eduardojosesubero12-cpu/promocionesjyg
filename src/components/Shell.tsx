@@ -330,8 +330,9 @@ export default function Shell({ children }: { children: React.ReactNode }) {
       </div>
 
       {/* Botón flotante OCR */}
-      <button className="fab-ocr" onClick={() => setOcrOpen(true)} title="Escáner OCR inteligente" aria-label="Escáner OCR">
+      <button className="fab-ocr" onClick={() => setOcrOpen(true)} title="Escáner OCR inteligente — C.I. y partida de nacimiento" aria-label="Escáner OCR">
         <ScanLine size={24} />
+        <span className="fab-tip">Escanear C.I. / Partida</span>
       </button>
     </>
   );
