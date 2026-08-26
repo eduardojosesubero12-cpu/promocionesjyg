@@ -1,22 +1,80 @@
 import React, { useState } from "react";
 import {
-  AlertTriangle, Check, Clock, Cloud, Copy, Database, Download, Euro, Eye, EyeOff, Globe, History,
-  KeyRound, Pencil, Plug, Plus, RefreshCw, ScanLine, ShieldCheck, Trash2, Upload, UploadCloud,
+  AlertTriangle, Briefcase, Check, Clock, Cloud, Cog, Copy, Database, Download, Euro, Eye, EyeOff,
+  Factory, Globe, History, Home, KeyRound, Lock, Pencil, Plug, Plus, RefreshCw, ScanLine, Server,
+  ShieldCheck, Trash2, Upload, UploadCloud, UserRound, Users, Wallet,
 } from "lucide-react";
 import { useApp } from "../lib/store";
-import type { PaqueteEscuela, Usuario } from "../lib/data";
+import type { PaqueteEscuela, Rol, Usuario } from "../lib/data";
 import {
-  API_DOLARES, API_EUROS, DB_TABLES, OCR_CRED, PAQUETES, ROL_DESC, ROL_LABEL, SUPABASE_SQL,
+  ACCESOS_DEFAULT, API_DOLARES, API_EUROS, DB_TABLES, MODULOS_GRUPOS, OCR_CRED, PAQUETES,
+  ROL_DESC, ROL_LABEL, ROLES_INFO, SUPABASE_SQL, TODOS_MODULOS,
   downloadFile, fmtBs, fmtFecha, fmtFechaHoraViva, fmtHaceSegundos, fmtUSD, toCSV, todayISO, uid,
 } from "../lib/data";
 import { Badge, Field, Modal, SectionHead, useNow } from "../components/ui";
 
-/* ============ USUARIOS (tarjetas) ============ */
-export function Usuarios() {
-  const { db, saveUsuario, deleteUsuario, confirm, success, toast, user: yo } = useApp();
-  const [form, setForm] = useState<Usuario | null>(null);
+/* Iconos por nombre (catálogo de roles y módulos) */
+const ICONOS: Record<string, any> = {
+  shield: ShieldCheck, user: UserRound, factory: Factory, wallet: Wallet,
+  home: Home, briefcase: Briefcase, cog: Cog, lock: Lock, server: Server,
+};
 
-  const guardar = async () => {
+/* Switch reutilizable (tamaños: grande para rol, pequeño para módulo) */
+function Switch({ on, onToggle, size = "sm", label }: { on: boolean; onToggle: () => void; size?: "sm" | "lg"; label?: string }) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={on}
+      aria-label={label}
+      onClick={(e) => { e.stopPropagation(); onToggle(); }}
+      className={`sw ${size === "lg" ? "sw-lg" : ""} ${on ? "on" : ""}`}
+    >
+      <span className="sw-knob" />
+    </button>
+  );
+}
+
+/* ============ USUARIOS — Roles y accesos del equipo JyG ============ */
+export function Usuarios() {
+  const { db, saveUsuario, deleteUsuario, confirm, success, toast, user: yo, setRolPermisos, setRolActivo } = useApp();
+  const [form, setForm] = useState<Usuario | null>(null);
+  const [selRol, setSelRol] = useState<Rol>("admin");
+  const [guardado, setGuardado] = useState(false);
+
+  /* Accesos actuales del rol seleccionado (editados o por defecto) */
+  const accesosSel = db.config.rolesPermisos?.[selRol] ?? (ACCESOS_DEFAULT[selRol] as string[]);
+  const rolSel = ROLES_INFO.find((r) => r.id === selRol)!;
+  const rolSelActivo = db.config.rolesActivos?.[selRol] !== false;
+
+  const flashGuardado = () => { setGuardado(true); setTimeout(() => setGuardado(false), 1400); };
+
+  const toggleModulo = (ruta: string) => {
+    const nuevo = accesosSel.includes(ruta) ? accesosSel.filter((r) => r !== ruta) : [...accesosSel, ruta];
+    setRolPermisos(selRol, nuevo);
+    flashGuardado();
+  };
+  const marcarTodos = (on: boolean) => {
+    setRolPermisos(selRol, on ? [...TODOS_MODULOS] : []);
+    flashGuardado();
+  };
+  const toggleRol = async (rol: Rol, activo: boolean) => {
+    if (!activo) {
+      const afectados = db.usuarios.filter((u) => u.rol === rol && u.activo).length;
+      const ok = await confirm({
+        title: "¿Está seguro de desactivar este rol?",
+        message: afectados > 0
+          ? `${afectados} usuario(s) con el rol "${ROL_LABEL[rol]}" perderán el acceso al sistema.`
+          : `El rol "${ROL_LABEL[rol]}" quedará sin acceso al sistema.`,
+        confirmText: "Desactivar", danger: true,
+      });
+      if (!ok) return;
+    }
+    setRolActivo(rol, activo);
+    toast(activo ? `Rol ${ROL_LABEL[rol]} activado` : `Rol ${ROL_LABEL[rol]} desactivado`, activo ? "ok" : "warn");
+  };
+
+  const guardarUsuario = async () => {
     if (!form || !form.nombre.trim()) { toast("El nombre es obligatorio", "err"); return; }
     const ok = await confirm({ title: "¿Desea guardar este registro?", message: "Verifique la información antes de continuar.", confirmText: "Sí, Guardar" });
     if (!ok) return;
@@ -24,13 +82,12 @@ export function Usuarios() {
     success();
     setForm(null);
   };
-  const eliminar = async (u: Usuario) => {
+  const eliminarUsuario = async (u: Usuario) => {
     const ok = await confirm({ title: "¿Está seguro de eliminar este registro?", message: `Se eliminará al usuario "${u.nombre}".`, confirmText: "Eliminar", danger: true });
     if (!ok) return;
     deleteUsuario(u.id);
     toast("Usuario eliminado", "warn");
   };
-  const rolTone = (r: string) => (r === "admin" ? "gold" : r === "cobranza" ? "red" : r === "produccion" ? "green" : "blue");
 
   return (
     <div className="page">
@@ -43,6 +100,118 @@ export function Usuarios() {
         <button className="btn btn-primary" onClick={() => setForm({ id: "", nombre: "", usuario: "", rol: "operador", activo: true })}><Plus size={16} /> Nuevo usuario</button>
       </div>
 
+      {/* ---------- Sesión actual ---------- */}
+      <div className="sess-card reveal">
+        <span className="user-avatar">{yo.nombre.split(" ").map((p) => p[0]).slice(0, 2).join("")}</span>
+        <div className="flex-grow-1" style={{ minWidth: 0 }}>
+          <div className="d-flex align-items-center gap-2 flex-wrap">
+            <span className="font-display fw-bold" style={{ fontSize: 15 }}>{yo.nombre}</span>
+            <Badge tone="blue">Sesión actual</Badge>
+          </div>
+          <div style={{ fontSize: 12, color: "var(--ink-faint)", marginTop: 2 }}>
+            @{yo.usuario} · <b style={{ color: "var(--ink-soft)" }}>{ROL_LABEL[yo.rol]}</b> ·{" "}
+            {db.config.rolesActivos?.[yo.rol] === false
+              ? <span style={{ color: "var(--danger)" }}>rol desactivado</span>
+              : <>{(db.config.rolesPermisos?.[yo.rol] ?? (ACCESOS_DEFAULT[yo.rol] as string[])).length} módulos activos</>}
+          </div>
+        </div>
+        <ShieldCheck size={26} style={{ color: "var(--jyg-gold-deep)", flexShrink: 0 }} />
+      </div>
+
+      {/* ---------- Panel de roles (switch on/off por rol) ---------- */}
+      <SectionHead
+        title="Roles del equipo"
+        desc="Activa o desactiva un rol con su switch · haz clic en la tarjeta para editar sus accesos"
+        actions={guardado ? <Badge tone="green" dot>Guardado</Badge> : undefined}
+      />
+      <div className="row g-3 mb-4">
+        {ROLES_INFO.map((r, i) => {
+          const Ico = ICONOS[r.icon];
+          const activo = db.config.rolesActivos?.[r.id] !== false;
+          const rutas = db.config.rolesPermisos?.[r.id] ?? (ACCESOS_DEFAULT[r.id] as string[]);
+          const usuariosRol = db.usuarios.filter((u) => u.rol === r.id).length;
+          const seleccionado = selRol === r.id;
+          return (
+            <div key={r.id} className="col-12 col-md-6 col-xl-3">
+              <div
+                className={`rol-card reveal ${seleccionado ? "sel" : ""} ${activo ? "" : "off"}`}
+                style={{ animationDelay: `${i * 60}ms`, ...(seleccionado ? { borderColor: r.color } : {}) }}
+                onClick={() => setSelRol(r.id)}
+                role="button"
+                tabIndex={0}
+              >
+                <div className="d-flex align-items-start justify-content-between w-100">
+                  <span className="rol-ic" style={{ background: `color-mix(in srgb, ${r.color} 14%, transparent)`, color: r.color }}>
+                    <Ico size={21} />
+                  </span>
+                  <Switch size="lg" on={activo} onToggle={() => toggleRol(r.id, !activo)} label={`Activar rol ${r.label}`} />
+                </div>
+                <div className="font-display fw-bold mt-2" style={{ fontSize: 15.5, color: activo ? "var(--ink)" : "var(--ink-faint)" }}>{r.label}</div>
+                <div style={{ fontSize: 11.5, color: "var(--ink-faint)", marginTop: 1, lineHeight: 1.35 }}>{r.desc}</div>
+                <div className="d-flex align-items-center gap-2 mt-3 flex-wrap">
+                  <span className="rol-stat"><Users size={12} /> {usuariosRol}</span>
+                  <span className="rol-stat"><Check size={12} /> {activo ? rutas.length : 0} módulos</span>
+                  {seleccionado && <Badge tone="blue" className="ms-auto">Editando</Badge>}
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* ---------- Matriz de accesos del rol seleccionado ---------- */}
+      <div className="card p-4 mb-4 reveal" style={{ borderTop: `3px solid ${rolSel.color}` }}>
+        <div className="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-3">
+          <div className="d-flex align-items-center gap-2">
+            <span className="rol-ic" style={{ background: `color-mix(in srgb, ${rolSel.color} 14%, transparent)`, color: rolSel.color, width: 34, height: 34 }}>
+              {React.createElement(ICONOS[rolSel.icon], { size: 17 })}
+            </span>
+            <div>
+              <div className="font-display fw-bold" style={{ fontSize: 15.5 }}>Accesos de {rolSel.label}</div>
+              <div style={{ fontSize: 12, color: "var(--ink-faint)" }}>
+                {rolSelActivo ? `${accesosSel.length} de ${TODOS_MODULOS.length} módulos permitidos` : "Rol desactivado — sin acceso"}
+              </div>
+            </div>
+          </div>
+          <div className="d-flex gap-2">
+            <button className="btn btn-soft btn-sm" onClick={() => marcarTodos(true)} disabled={!rolSelActivo}>Marcar todos</button>
+            <button className="btn btn-ghost btn-sm" onClick={() => marcarTodos(false)} disabled={!rolSelActivo}>Quitar todos</button>
+          </div>
+        </div>
+
+        <div className={rolSelActivo ? "" : "perm-disabled"}>
+          {MODULOS_GRUPOS.map((g) => {
+            const GIco = ICONOS[g.icon];
+            const activosGrupo = g.items.filter((m) => accesosSel.includes(m.ruta)).length;
+            return (
+              <div key={g.seccion} className="perm-group">
+                <div className="perm-group-head">
+                  <span className="d-flex align-items-center gap-2">
+                    <GIco size={14} style={{ color: rolSel.color }} />
+                    <span className="font-display fw-semibold" style={{ fontSize: 12.5 }}>{g.seccion}</span>
+                  </span>
+                  <span className="perm-count tabular-nums">{activosGrupo}/{g.items.length}</span>
+                </div>
+                <div className="perm-rows">
+                  {g.items.map((m) => {
+                    const on = accesosSel.includes(m.ruta);
+                    return (
+                      <div key={m.ruta} className={`perm-row ${on ? "on" : ""}`} onClick={() => rolSelActivo && toggleModulo(m.ruta)} role="button" tabIndex={0}>
+                        <span className="perm-dot" style={{ background: on ? rolSel.color : "var(--line)" }} />
+                        <span className="flex-grow-1" style={{ fontSize: 13, fontWeight: on ? 600 : 500, color: on ? "var(--ink)" : "var(--ink-faint)" }}>{m.label}</span>
+                        <Switch on={on} onToggle={() => toggleModulo(m.ruta)} label={`Permiso ${m.label}`} />
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* ---------- Equipo ---------- */}
+      <SectionHead title="Equipo JyG" desc={`${db.usuarios.length} usuarios registrados`} />
       <div className="row g-3">
         {db.usuarios.map((u, i) => (
           <div key={u.id} className="col-12 col-md-6 col-xl-4">
@@ -50,26 +219,13 @@ export function Usuarios() {
               <span className={`user-avatar ${u.activo ? "" : "inactivo"}`}>{u.nombre.split(" ").map((p) => p[0]).slice(0, 2).join("")}</span>
               <div className="user-info">
                 <div className="u-nombre">{u.nombre}{u.id === yo.id && <Badge tone="blue" className="ms-2">Tú</Badge>}</div>
-                <div className="u-login">@{u.usuario} · <Badge tone={rolTone(u.rol)}>{ROL_LABEL[u.rol]}</Badge></div>
+                <div className="u-login">@{u.usuario} · <Badge tone={u.rol === "admin" ? "gold" : u.rol === "cobranza" ? "red" : u.rol === "produccion" ? "green" : "blue"}>{ROL_LABEL[u.rol]}</Badge></div>
               </div>
               <div className="user-actions">
-                <button className="icon-btn" title={u.activo ? "Desactivar" : "Activar"} onClick={() => { saveUsuario({ ...u, activo: !u.activo }); toast(u.activo ? "Usuario desactivado" : "Usuario activado", "ok"); }}>
-                  <span className="rounded-circle" style={{ width: 9, height: 9, background: u.activo ? "var(--ok)" : "var(--danger)" }} />
-                </button>
+                <Switch on={u.activo} onToggle={() => { saveUsuario({ ...u, activo: !u.activo }); toast(u.activo ? "Usuario desactivado" : "Usuario activado", "ok"); }} label={`Activar ${u.nombre}`} />
                 <button className="icon-btn" title="Editar" onClick={() => setForm(u)}><Pencil size={15} /></button>
-                <button className="icon-btn danger" title="Eliminar" onClick={() => eliminar(u)}><Trash2 size={15} /></button>
+                <button className="icon-btn danger" title="Eliminar" onClick={() => eliminarUsuario(u)}><Trash2 size={15} /></button>
               </div>
-            </div>
-          </div>
-        ))}
-      </div>
-
-      <div className="row g-4 mt-2">
-        {Object.entries(ROL_DESC).map(([k, v]) => (
-          <div key={k} className="col-12 col-md-6 col-xl-3">
-            <div className="card p-3 h-100">
-              <Badge tone={rolTone(k)}>{ROL_LABEL[k as Usuario["rol"]]}</Badge>
-              <p className="mt-2 mb-0" style={{ fontSize: 12.5, color: "var(--ink-soft)" }}>{v}</p>
             </div>
           </div>
         ))}
@@ -77,13 +233,13 @@ export function Usuarios() {
 
       {form && (
         <Modal open onClose={() => setForm(null)} title={form.id ? "Editar usuario" : "Nuevo usuario"}
-          footer={<><button className="btn btn-ghost" onClick={() => setForm(null)}>Cancelar</button><button className="btn btn-primary" onClick={guardar}><Check size={15} /> Sí, Guardar</button></>}>
+          footer={<><button className="btn btn-ghost" onClick={() => setForm(null)}>Cancelar</button><button className="btn btn-primary" onClick={guardarUsuario}><Check size={15} /> Sí, Guardar</button></>}>
           <div className="row g-3">
             <Field label="Nombre" required className="col-12"><input className="input" value={form.nombre} onChange={(e) => setForm({ ...form, nombre: e.target.value })} autoFocus /></Field>
             <Field label="Usuario" className="col-md-6"><input className="input" value={form.usuario} onChange={(e) => setForm({ ...form, usuario: e.target.value })} /></Field>
             <Field label="Rol" className="col-md-6">
               <select className="select" value={form.rol} onChange={(e) => setForm({ ...form, rol: e.target.value as Usuario["rol"] })}>
-                {Object.entries(ROL_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+                {ROLES_INFO.map((r) => <option key={r.id} value={r.id}>{r.label}</option>)}
               </select>
             </Field>
           </div>

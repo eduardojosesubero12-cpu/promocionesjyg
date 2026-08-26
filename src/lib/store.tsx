@@ -4,7 +4,7 @@ import type {
   MensajeLog, OcrDraft, Pago, Rol, Sesion, Usuario, PaqueteEscuela,
 } from "./data";
 import {
-  API_DOLARES, API_EUROS, SEED_CONFIG, SEED_COTIZACIONES, SEED_DOCENTES, SEED_ESCUELAS,
+  ACCESOS_DEFAULT, API_DOLARES, API_EUROS, SEED_CONFIG, SEED_COTIZACIONES, SEED_DOCENTES, SEED_ESCUELAS,
   SEED_ESTUDIANTES, SEED_EVENTOS, SEED_HISTORIAL, SEED_PAQUETES_ESCUELAS, SEED_SESIONES, SEED_USUARIOS,
   todayISO, uid,
 } from "./data";
@@ -69,6 +69,7 @@ interface Ctx {
   mobileNav: boolean; setMobileNav: (v: boolean) => void;
   dark: boolean; toggleDark: () => void;
   user: Usuario; can: (r: Route) => boolean; setCurrentUser: (id: string) => void;
+  setRolPermisos: (rol: Rol, rutas: string[]) => void; setRolActivo: (rol: Rol, activo: boolean) => void;
   tasa: Tasa; tasaLoading: boolean; refreshTasa: () => void;
   ocrOpen: boolean; setOcrOpen: (v: boolean) => void;
   ocrDraft: OcrDraft | null; setOcrDraft: (d: OcrDraft | null) => void;
@@ -140,7 +141,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const user = useMemo(() => db.usuarios.find((u) => u.id === db.currentUserId) || db.usuarios[0], [db.usuarios, db.currentUserId]);
-  const can = useCallback((r: Route) => ACCESS[user.rol].includes(r), [user]);
+  /* Accesos: se leen de config.rolesPermisos (editables); si no, defaults. Si el rol está desactivado, sin acceso. */
+  const can = useCallback((r: Route) => {
+    const rol = user.rol;
+    if (db.config.rolesActivos && db.config.rolesActivos[rol] === false) return false;
+    const rutas = db.config.rolesPermisos?.[rol] ?? (ACCESS[rol] as string[]) ?? ACCESOS_DEFAULT[rol];
+    return rutas.includes(r);
+  }, [user, db.config.rolesPermisos, db.config.rolesActivos]);
   const setCurrentUser = useCallback((id: string) => setDb((d) => ({ ...d, currentUserId: id })), []);
 
   /* ---- Tasa en vivo ---- */
@@ -254,6 +261,16 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const deleteTasaHistorial = useCallback((id: string) => mutate((d) => ({ ...d, historialTasas: d.historialTasas.filter((x) => x.id !== id) })), [mutate]);
   const clearTasaHistorial = useCallback(() => mutate((d) => ({ ...d, historialTasas: [] })), [mutate]);
   const setConfig = useCallback((patch: Partial<Config>) => mutate((d) => ({ ...d, config: { ...d.config, ...patch } })), [mutate]);
+
+  /* ---- Edición de roles y accesos (persistente) ---- */
+  const setRolPermisos = useCallback((rol: Rol, rutas: string[]) => mutate((d) => ({
+    ...d,
+    config: { ...d.config, rolesPermisos: { ...(d.config.rolesPermisos || {}), [rol]: rutas } as Record<Rol, string[]> },
+  })), [mutate]);
+  const setRolActivo = useCallback((rol: Rol, activo: boolean) => mutate((d) => ({
+    ...d,
+    config: { ...d.config, rolesActivos: { ...(d.config.rolesActivos || {}), [rol]: activo } as Record<Rol, boolean> },
+  })), [mutate]);
   const savePaqueteEscuela = useCallback((p: PaqueteEscuela) => mutate((d) => ({ ...d, paquetesEscuelas: upsert(d.paquetesEscuelas, p) })), [mutate]);
   const deletePaqueteEscuela = useCallback((id: string) => mutate((d) => ({ ...d, paquetesEscuelas: d.paquetesEscuelas.filter((x) => x.id !== id) })), [mutate]);
 
@@ -339,6 +356,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     addPago, deletePago, setPedidoEstado, saveCodigos, saveCotizacion, deleteCotizacion, convertirCotizacion,
     saveSesion, deleteSesion, saveEvento, deleteEvento, addMensaje, saveUsuario, deleteUsuario,
     setConfig, deleteTasaHistorial, clearTasaHistorial, savePaqueteEscuela, deletePaqueteEscuela, exportBackup, importBackup,
+    setRolPermisos, setRolActivo,
     syncInfo, syncing, testCloud, syncToCloud, restoreFromCloud, alerts,
   };
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
