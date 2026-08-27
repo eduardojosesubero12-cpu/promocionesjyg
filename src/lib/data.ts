@@ -130,6 +130,8 @@ export const ACCESOS_DEFAULT: Record<Rol, string[]> = {
 /* ============================================================
    HELPERS
    ============================================================ */
+export const API_DOLARES = "https://ve.dolarapi.com/v1/dolares";
+export const API_EUROS = "https://ve.dolarapi.com/v1/euros";
 export const uid = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
 export const todayISO = () => new Date().toISOString().slice(0, 10);
 export const fmtUSD = (n: number) => "$" + n.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
