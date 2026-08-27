@@ -8,6 +8,7 @@ import type {
   Config, Cotizacion, CRMData, Docente, Escuela, Estudiante, Evento, HistorialTasa,
   MensajeLog, OcrDraft, PaqueteEscuela, Pago, Rol, Route, Sesion, Usuario,
 } from "./data";
+export type { Route, Rol };
 
 interface DB extends CRMData {}
 const KEY = "jyg-crm-db-v1";
