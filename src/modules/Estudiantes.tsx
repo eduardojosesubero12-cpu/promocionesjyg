@@ -128,7 +128,7 @@ export default function Estudiantes() {
 
 /* ---------------- Formulario ---------------- */
 function EstudianteForm({ initial, onClose }: { initial: Partial<Estudiante>; onClose: () => void }) {
-  const { db, saveEstudiante, success, ocrDraft, setOcrDraft } = useApp();
+  const { db, saveEstudiante, success, ocrDraft, setOcrDraft, tasa } = useApp();
   const [f, setF] = useState<Estudiante>(() => {
     const base = { ...nuevo(db.seqPedido), ...initial } as Estudiante;
     if (ocrDraft?.nombre && !base.nombre) base.nombre = ocrDraft.nombre;
@@ -149,13 +149,18 @@ function EstudianteForm({ initial, onClose }: { initial: Partial<Estudiante>; on
 
   return (
     <Modal open onClose={onClose} size="lg" title={f.id ? `Editar ${f.pedido}` : `Nuevo estudiante · ${f.pedido}`}>
+      <div className="form-section" style={{ marginTop: 4 }}>Información básica</div>
       <div className="row g-3">
         <Field label="Nombre del alumno" required className="col-md-6">
-          <input className="input" value={f.nombre} onChange={(e) => setF({ ...f, nombre: e.target.value })} autoFocus />
+          <input className="input" value={f.nombre} onChange={(e) => setF({ ...f, nombre: e.target.value })} autoFocus placeholder="Nombre y apellido" />
         </Field>
         <Field label="Cédula (C.I.)" className="col-md-3"><input className="input" placeholder="V-00.000.000" value={f.ci} onChange={(e) => setF({ ...f, ci: e.target.value })} /></Field>
-        <Field label="Teléfono" className="col-md-3"><input className="input" value={f.telefono} onChange={(e) => setF({ ...f, telefono: e.target.value })} /></Field>
-        <Field label="Representante" className="col-md-6"><input className="input" value={f.representante} onChange={(e) => setF({ ...f, representante: e.target.value })} /></Field>
+        <Field label="Teléfono" className="col-md-3"><input className="input" placeholder="0412-0000000" value={f.telefono} onChange={(e) => setF({ ...f, telefono: e.target.value })} /></Field>
+        <Field label="Representante" className="col-md-12"><input className="input" placeholder="Nombre del representante" value={f.representante} onChange={(e) => setF({ ...f, representante: e.target.value })} /></Field>
+      </div>
+
+      <div className="form-section">Académico</div>
+      <div className="row g-3">
         <Field label="Escuela" className="col-md-6">
           <select className="select" value={f.escuelaId} onChange={(e) => setF({ ...f, escuelaId: e.target.value })}>
             <option value="">— Seleccione —</option>
@@ -168,26 +173,30 @@ function EstudianteForm({ initial, onClose }: { initial: Partial<Estudiante>; on
             {db.docentes.filter((d) => !f.escuelaId || d.escuelaId === f.escuelaId).map((d) => <option key={d.id} value={d.id}>{d.nombre}</option>)}
           </select>
         </Field>
-        <Field label="Grado" className="col-md-3">
+        <Field label="Grado" className="col-md-6">
           <select className="select" value={f.grado} onChange={(e) => setF({ ...f, grado: e.target.value })}>{GRADOS.map((g) => <option key={g}>{g}</option>)}</select>
         </Field>
-        <Field label="Sección" className="col-md-3">
+        <Field label="Sección" className="col-md-6">
           <select className="select" value={f.seccion} onChange={(e) => setF({ ...f, seccion: e.target.value })}>{SECCIONES.map((s) => <option key={s}>{s}</option>)}</select>
         </Field>
-        <Field label="Paquete" className="col-md-6">
+      </div>
+
+      <div className="form-section">Paquete y precio</div>
+      <div className="row g-3">
+        <Field label="Paquete de grado" className="col-md-5">
           <select className="select" value={f.paqueteId} onChange={(e) => setF({ ...f, paqueteId: e.target.value, precioPaquete: PAQUETES[e.target.value].precioBase })}>
             {Object.values(PAQUETES).map((p) => <option key={p.id} value={p.id}>{p.nombre} — ${p.precioBase}</option>)}
           </select>
         </Field>
-        <Field label="Precio del paquete (USD)" className="col-md-4">
+        <Field label="Precio del paquete (USD)" className="col-md-3">
           <input type="number" className="input" value={f.precioPaquete} onChange={(e) => setF({ ...f, precioPaquete: Number(e.target.value) || 0 })} />
         </Field>
-        <Field label="Observaciones" className="col-md-8">
-          <input className="input" value={f.observaciones} onChange={(e) => setF({ ...f, observaciones: e.target.value })} />
+        <Field label="Observaciones" className="col-md-4">
+          <input className="input" placeholder="Opcional" value={f.observaciones} onChange={(e) => setF({ ...f, observaciones: e.target.value })} />
         </Field>
       </div>
 
-      <div className="card p-3 mt-3" style={{ background: "var(--card-bg-2)" }}>
+      <div className="card p-3 mt-4" style={{ background: "var(--card-bg-2)", border: "1px dashed var(--line)" }}>
         <SectionHead title="Adicionales" desc="Productos extra del pedido" />
         {f.adicionales.map((a, i) => (
           <div key={i} className="d-flex align-items-center gap-2 py-1" style={{ fontSize: 13 }}>
@@ -206,11 +215,17 @@ function EstudianteForm({ initial, onClose }: { initial: Partial<Estudiante>; on
         </select>
       </div>
 
-      <div className="d-flex align-items-center justify-content-between mt-3 flex-wrap gap-2">
-        <span className="font-display fw-bold" style={{ fontSize: 17, color: "var(--jyg-navy)" }}>Total: {fmtUSD(t.total)}</span>
+      <div className="d-flex align-items-center justify-content-between mt-4 flex-wrap gap-3 rounded-3 px-3 py-3" style={{ background: "linear-gradient(140deg, color-mix(in srgb, var(--jyg-navy) 10%, var(--card-bg)), var(--card-bg))", border: "1px solid var(--line-soft)" }}>
+        <div>
+          <div className="text-uppercase" style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: 1.4, color: "var(--ink-faint)" }}>Total del pedido · tasa {fmtBs(tasa.usd)}/$</div>
+          <div className="d-flex align-items-baseline gap-2 flex-wrap">
+            <span className="font-display fw-bold tabular-nums" style={{ fontSize: 22, color: "var(--jyg-navy)", letterSpacing: "-0.5px" }}>{fmtUSD(t.total)}</span>
+            <span className="tabular-nums" style={{ fontSize: 12.5, fontWeight: 600, color: "var(--ink-soft)" }}>≈ {fmtBs(t.total * tasa.usd)}</span>
+          </div>
+        </div>
         <div className="d-flex gap-2">
           <button className="btn btn-ghost" onClick={onClose}>Cancelar</button>
-          <button className="btn btn-primary" onClick={guardar}><Check size={15} /> Sí, Guardar</button>
+          <button className="btn btn-primary" onClick={guardar} disabled={!f.nombre.trim()}><Check size={15} /> Sí, Guardar</button>
         </div>
       </div>
     </Modal>

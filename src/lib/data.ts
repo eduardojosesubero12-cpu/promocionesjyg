@@ -46,6 +46,9 @@ export interface Config {
   preciosPaquetes: number[];
   usarApi: boolean; usarTasaManual: boolean; tasaFallback: number; tasaManualUSD: number; tasaManualEUR: number;
   historialAuto: boolean; supabaseUrl: string; supabaseKey: string; autoSyncCloud: boolean;
+  /* Roles y accesos editables (persisten hasta que se editen) */
+  rolesPermisos?: Record<Rol, string[]>;
+  rolesActivos?: Record<Rol, boolean>;
 }
 export interface OcrDraft { nombre: string; ci: string; fecha: string; raw?: string; }
 export interface CRMData {
@@ -113,7 +116,8 @@ export const API_EUROS = "https://ve.dolarapi.com/v1/euros";
 export const OCR_CRED = {
   correo: "ocr-esca@thermal-scene-505819-t0.iam.gserviceaccount.com",
   id: "104968516099790647092",
-  clave: "a1d27bff3a54da57c82e09ab6aed9ecd6d3e3901",
+  /* ⚠️ La clave es un secreto: se guarda en el navegador desde Configuración, no en el código. */
+  clave: "",
 };
 
 export const PLANTILLAS_MENSAJE = [
@@ -129,6 +133,64 @@ export const ROL_DESC: Record<Rol, string> = {
   operador: "Registra estudiantes, escuelas y profesores, y gestiona cotizaciones.",
   produccion: "Visualiza materiales, cola de producción y sesiones fotográficas.",
   cobranza: "Gestiona pagos, abonos, saldos y facturación.",
+};
+
+/* ============================================================
+   ROLES Y ACCESOS — catálogo editable desde Usuarios
+   ============================================================ */
+export const ROLES_INFO: { id: Rol; label: string; desc: string; icon: string; color: string }[] = [
+  { id: "admin", label: "Administrador", desc: "Control total del sistema", icon: "shield", color: "#104172" },
+  { id: "operador", label: "Operador", desc: "Registra estudiantes y pagos", icon: "user", color: "#2f7ac2" },
+  { id: "produccion", label: "Producción", desc: "Materiales, pedidos y fotos", icon: "factory", color: "#c98f00" },
+  { id: "cobranza", label: "Cobranza", desc: "Pagos, saldos y reportes", icon: "wallet", color: "#e28800" },
+];
+
+export const MODULOS_GRUPOS: { seccion: string; icon: string; items: { ruta: string; label: string }[] }[] = [
+  { seccion: "Principal", icon: "home", items: [{ ruta: "dashboard", label: "Dashboard" }] },
+  {
+    seccion: "CRM", icon: "briefcase", items: [
+      { ruta: "clientes", label: "Clientes" },
+      { ruta: "escuelas", label: "Escuelas" },
+      { ruta: "docentes", label: "Profesores" },
+      { ruta: "estudiantes", label: "Estudiantes" },
+      { ruta: "ventas", label: "Ventas · Pedidos" },
+      { ruta: "paquetes", label: "Paquetes" },
+      { ruta: "cotizaciones", label: "Cotizaciones" },
+      { ruta: "mensajes", label: "Mensajes" },
+    ],
+  },
+  {
+    seccion: "Operaciones", icon: "cog", items: [
+      { ruta: "sesiones", label: "Sesiones Fotográficas" },
+      { ruta: "agenda", label: "Agenda / Calendario" },
+      { ruta: "produccion", label: "Producción" },
+      { ruta: "qr", label: "Tarjetas QR" },
+      { ruta: "ocr", label: "Escáner Inteligente" },
+      { ruta: "facturas", label: "Facturación" },
+    ],
+  },
+  {
+    seccion: "Administración", icon: "lock", items: [
+      { ruta: "reportes", label: "Reportes" },
+      { ruta: "usuarios", label: "Usuarios" },
+    ],
+  },
+  {
+    seccion: "Sistema", icon: "server", items: [
+      { ruta: "config", label: "Configuración" },
+      { ruta: "integraciones", label: "Integraciones" },
+    ],
+  },
+];
+
+export const TODOS_MODULOS: string[] = MODULOS_GRUPOS.flatMap((g) => g.items.map((i) => i.ruta));
+
+/* Accesos por defecto de cada rol (base de la matriz editable) */
+export const ACCESOS_DEFAULT: Record<Rol, string[]> = {
+  admin: [...TODOS_MODULOS],
+  operador: ["dashboard", "clientes", "escuelas", "docentes", "estudiantes", "ventas", "paquetes", "cotizaciones", "mensajes", "qr", "ocr", "facturas"],
+  produccion: ["dashboard", "paquetes", "produccion", "qr", "sesiones", "agenda"],
+  cobranza: ["dashboard", "clientes", "estudiantes", "ventas", "facturas", "reportes", "mensajes"],
 };
 
 export const DB_TABLES = [
