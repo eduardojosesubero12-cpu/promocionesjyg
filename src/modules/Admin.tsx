@@ -1,92 +1,253 @@
-import React, { useState } from "react";
+import React, { useMemo, useRef, useState } from "react";
 import {
-  AlertTriangle, Briefcase, Check, Clock, Cloud, Cog, Copy, Database, Download, Euro, Eye, EyeOff,
-  Factory, Globe, History, Home, KeyRound, Lock, Pencil, Plug, Plus, RefreshCw, ScanLine, Server,
-  ShieldCheck, Trash2, Upload, UploadCloud, UserRound, Users, Wallet,
+  BarChart3, Boxes, Check, Copy, Download, Eye, EyeOff, GraduationCap, History, KeyRound,
+  Package, Pencil, Plug, Plus, Save, ScanLine, ShieldCheck, Sparkles, Trash2, Upload, UserCog, Users, Wallet, X,
 } from "lucide-react";
 import { useApp } from "../lib/store";
-import type { PaqueteEscuela, Rol, Usuario } from "../lib/data";
+import type { CatAdicional, PaqueteEscuela, Rol, Usuario } from "../lib/data";
 import {
-  ACCESOS_DEFAULT, API_DOLARES, API_EUROS, DB_TABLES, MODULOS_GRUPOS, OCR_CRED, PAQUETES,
-  ROL_DESC, ROL_LABEL, ROLES_INFO, SUPABASE_SQL, TODOS_MODULOS,
-  downloadFile, fmtBs, fmtFecha, fmtFechaHoraViva, fmtHaceSegundos, fmtUSD, toCSV, todayISO, uid,
+  ACCESOS_DEFAULT, API_DOLARES, API_EUROS, DB_TABLES, MODULOS_GRUPOS, OPENROUTER_MODELOS, ORDEN_MATERIALES,
+  PAQUETES, ROL_DESC, ROL_LABEL, ROLES_INFO, SUPABASE_SQL, TODOS_MODULOS,
+  computeProduccion, downloadFile, estudianteTotales, fmtBs, fmtFecha, fmtFechaHoraViva, fmtHaceSegundos,
+  fmtUSD, getAdicionales, getGrados, getSecciones, getTallas, toCSV, todayISO, uid,
 } from "../lib/data";
-import { Badge, Field, Modal, SectionHead, useNow } from "../components/ui";
+import {
+  Badge, Bar, EmptyState, Field, FilterSelect, FormFoot, FormSec, Modal, SearchInput, SectionHead,
+  Switch, Toolbar, estadoPagoTone, useNow,
+} from "../components/ui";
 
-/* Iconos por nombre (catálogo de roles y módulos) */
-const ICONOS: Record<string, any> = {
-  shield: ShieldCheck, user: UserRound, factory: Factory, wallet: Wallet,
-  home: Home, briefcase: Briefcase, cog: Cog, lock: Lock, server: Server,
-};
+/* ============================================================
+   REPORTES
+   ============================================================ */
+export function Reportes() {
+  const { db, tasa, toast } = useApp();
+  const [fEscuela, setFEscuela] = useState("");
+  const [fDocente, setFDocente] = useState("");
+  const [fGrado, setFGrado] = useState("");
+  const [fSeccion, setFSeccion] = useState("");
+  const [fPago, setFPago] = useState("");
+  const [fEstado, setFEstado] = useState("");
+  const [desde, setDesde] = useState("");
+  const [hasta, setHasta] = useState("");
 
-/* Switch reutilizable (tamaños: grande para rol, pequeño para módulo) */
-function Switch({ on, onToggle, size = "sm", label }: { on: boolean; onToggle: () => void; size?: "sm" | "lg"; label?: string }) {
+  const filtrados = useMemo(() => db.estudiantes.filter((e) => {
+    const t = estudianteTotales(e);
+    if (fEscuela && e.escuelaId !== fEscuela) return false;
+    if (fDocente && e.docenteId !== fDocente) return false;
+    if (fGrado && e.grado !== fGrado) return false;
+    if (fSeccion && e.seccion !== fSeccion) return false;
+    if (fPago && t.estadoPago !== fPago) return false;
+    if (fEstado && e.estadoPedido !== fEstado) return false;
+    if (desde && e.fechaRegistro < desde) return false;
+    if (hasta && e.fechaRegistro > hasta) return false;
+    return true;
+  }), [db.estudiantes, fEscuela, fDocente, fGrado, fSeccion, fPago, fEstado, desde, hasta]);
+
+  const fin = useMemo(() => {
+    let vendido = 0, cobrado = 0;
+    for (const e of filtrados) { const t = estudianteTotales(e); vendido += t.total; cobrado += t.abonado; }
+    return { vendido, cobrado, pendiente: Math.max(0, vendido - cobrado) };
+  }, [filtrados]);
+  const prod = useMemo(() => computeProduccion(filtrados.filter((e) => e.estadoPedido !== "Entregado")), [filtrados]);
+  const porEscuela = useMemo(() => db.escuelas.map((es) => {
+    const hijos = filtrados.filter((e) => e.escuelaId === es.id);
+    return { nombre: es.nombre, n: hijos.length, vendido: hijos.reduce((s, e) => s + estudianteTotales(e).total, 0) };
+  }).filter((x) => x.n > 0).sort((a, b) => b.vendido - a.vendido), [db.escuelas, filtrados]);
+  const maxV = Math.max(1, porEscuela[0]?.vendido || 1);
+
+  const exportFin = () => {
+    downloadFile(`reporte-finanzas-${todayISO()}.csv`, toCSV(
+      ["Pedido", "Estudiante", "Escuela", "Grado", "Registro", "Total USD", "Abonado USD", "Saldo USD", "Estado pago", "Estado pedido"],
+      filtrados.map((e) => { const t = estudianteTotales(e); return [e.pedido, e.nombre, db.escuelas.find((x) => x.id === e.escuelaId)?.nombre || "", `${e.grado} ${e.seccion}`, e.fechaRegistro, t.total.toFixed(2), t.abonado.toFixed(2), t.saldo.toFixed(2), t.estadoPago, e.estadoPedido]; })
+    ));
+    toast("Reporte financiero exportado", "ok");
+  };
+  const exportProd = () => {
+    downloadFile(`reporte-produccion-${todayISO()}.csv`, toCSV(["Material", "Cantidad"], Object.entries(prod.materiales).filter(([, q]) => q > 0).map(([m, q]) => [m, q])));
+    toast("Reporte de producción exportado", "ok");
+  };
+
+  const kpis = [
+    { icon: Wallet, l: "Total vendido", v: fmtUSD(fin.vendido), s: fmtBs(fin.vendido * tasa.usd), c: "var(--jyg-navy)", bg: "var(--tint-navy-2)" },
+    { icon: Check, l: "Total cobrado", v: fmtUSD(fin.cobrado), s: fmtBs(fin.cobrado * tasa.usd), c: "var(--ok)", bg: "var(--tint-ok)" },
+    { icon: History, l: "Total pendiente", v: fmtUSD(fin.pendiente), s: fmtBs(fin.pendiente * tasa.usd), c: "var(--danger)", bg: "var(--tint-danger)" },
+  ];
+
   return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={on}
-      aria-label={label}
-      onClick={(e) => { e.stopPropagation(); onToggle(); }}
-      className={`sw ${size === "lg" ? "sw-lg" : ""} ${on ? "on" : ""}`}
-    >
-      <span className="sw-knob" />
-    </button>
+    <div className="page">
+      <div className="page-head">
+        <div>
+          <div className="crumb">Administración</div>
+          <h1>Reportes</h1>
+          <p style={{ fontSize: 13.5, margin: "4px 0 0", color: "var(--ink-soft)" }}>Filtra por escuela, docente, grado, sección, pago, producción o fecha</p>
+        </div>
+        <div className="d-flex gap-2 flex-wrap">
+          <button className="btn btn-ghost" onClick={exportFin}><Download size={15} /> Finanzas CSV</button>
+          <button className="btn btn-primary" onClick={exportProd}><Download size={15} /> Producción CSV</button>
+        </div>
+      </div>
+
+      <Toolbar count={filtrados.length} countLabel={filtrados.length === 1 ? "estudiante filtrado" : "estudiantes filtrados"}>
+        <FilterSelect value={fEscuela} onChange={setFEscuela} allLabel="Escuela" width={180} options={db.escuelas.map((e) => ({ v: e.id, l: e.nombre }))} />
+        <FilterSelect value={fDocente} onChange={setFDocente} allLabel="Docente" width={165} options={db.docentes.map((d) => ({ v: d.id, l: d.nombre }))} />
+        <FilterSelect value={fGrado} onChange={setFGrado} allLabel="Grado" width={140} options={getGrados(db.config).map((g) => ({ v: g, l: g }))} />
+        <FilterSelect value={fSeccion} onChange={setFSeccion} allLabel="Sección" width={110} options={getSecciones(db.config).map((s) => ({ v: s, l: s }))} />
+        <FilterSelect value={fPago} onChange={setFPago} allLabel="Estado de pago" width={160} options={["Sin Abonos", "Primera Parte", "Segunda Parte", "Tercera Parte", "Pagado Completo"].map((s) => ({ v: s, l: s }))} />
+        <FilterSelect value={fEstado} onChange={setFEstado} allLabel="Producción" width={145} options={["Registrado", "Producción", "Impresión", "Empaque", "Entregado"].map((s) => ({ v: s, l: s }))} />
+        <span className="d-flex align-items-center gap-1" style={{ fontSize: 12, color: "var(--ink-faint)" }}>
+          <input type="date" className="input" style={{ width: 140, height: 34, fontSize: 12 }} value={desde} onChange={(e) => setDesde(e.target.value)} title="Desde" />
+          →
+          <input type="date" className="input" style={{ width: 140, height: 34, fontSize: 12 }} value={hasta} onChange={(e) => setHasta(e.target.value)} title="Hasta" />
+        </span>
+      </Toolbar>
+
+      <div className="row g-3 mb-3">
+        {kpis.map((k, i) => (
+          <div key={k.l} className="col-12 col-md-4">
+            <div className="card p-3 p-md-4 reveal" style={{ animationDelay: `${i * 70}ms`, borderLeft: `4px solid ${k.c}` }}>
+              <div className="d-flex align-items-center gap-3">
+                <span className="d-flex align-items-center justify-content-center rounded-3 flex-shrink-0" style={{ width: 46, height: 46, background: k.bg, color: k.c }}><k.icon size={20} /></span>
+                <div>
+                  <div className="font-display fw-bold" style={{ fontSize: 22, color: k.c, fontVariantNumeric: "tabular-nums" }}>{k.v}</div>
+                  <div style={{ fontSize: 10.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1, color: "var(--ink-faint)" }}>{k.l}</div>
+                  <div style={{ fontSize: 11.5, color: "var(--ink-soft)" }}>{k.s}</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div className="row g-3">
+        <div className="col-12 col-xl-6">
+          <div className="card p-3 p-md-4 h-100">
+            <SectionHead title="Producción" desc="Materiales requeridos por los pedidos filtrados" />
+            {Object.entries(prod.materiales).filter(([, q]) => q > 0).length === 0 ? (
+              <p style={{ fontSize: 13, color: "var(--ink-faint)", padding: "8px 0" }}>Sin materiales pendientes con los filtros actuales.</p>
+            ) : (
+              <div className="d-flex flex-column gap-2">
+                {ORDEN_MATERIALES.filter((m) => (prod.materiales[m] || 0) > 0).map((m) => {
+                  const q = prod.materiales[m] || 0;
+                  const mx = Math.max(...Object.values(prod.materiales));
+                  return (
+                    <div key={m} className="d-flex align-items-center gap-3">
+                      <span className="fw-semibold text-truncate" style={{ fontSize: 13, width: 150, color: "var(--ink-soft)" }}>{m}</span>
+                      <div className="flex-grow-1"><Bar pct={(q / mx) * 100} /></div>
+                      <span className="font-display fw-bold" style={{ width: 38, textAlign: "right" }}>{q}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+            <p className="mt-3 mb-0" style={{ fontSize: 12, color: "var(--ink-faint)" }}>
+              Pedidos pendientes: <b className="font-display">{filtrados.filter((e) => e.estadoPedido !== "Entregado").length}</b> · Entregados: <b className="font-display">{filtrados.filter((e) => e.estadoPedido === "Entregado").length}</b>
+            </p>
+          </div>
+        </div>
+        <div className="col-12 col-xl-6">
+          <div className="card p-3 p-md-4 h-100">
+            <SectionHead title="Estudiantes por escuela" desc="Distribución del monto vendido" />
+            {porEscuela.length === 0 ? (
+              <p style={{ fontSize: 13, color: "var(--ink-faint)", padding: "8px 0" }}>Sin datos con los filtros actuales.</p>
+            ) : (
+              <div className="d-flex flex-column gap-3">
+                {porEscuela.map((r, i) => (
+                  <div key={r.nombre}>
+                    <div className="d-flex justify-content-between align-items-baseline mb-1">
+                      <span className="font-display fw-semibold text-truncate" style={{ fontSize: 12.5 }}>{i === 0 ? "★ " : ""}{r.nombre}</span>
+                      <span style={{ fontSize: 11.5, color: "var(--ink-faint)" }}>{r.n} est. · <b style={{ color: "var(--jyg-navy)" }}>{fmtUSD(r.vendido)}</b></span>
+                    </div>
+                    <Bar pct={(r.vendido / maxV) * 100} color={i === 0 ? "var(--jyg-gold-deep)" : "var(--jyg-navy)"} />
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      <div className="card p-3 p-md-4 mt-3">
+        <SectionHead title={`Detalle (${filtrados.length} estudiantes)`} desc="Estado de pago individual con los filtros aplicados" />
+        <div className="table-responsive">
+          <table className="tbl">
+            <thead><tr><th>Pedido</th><th>Estudiante</th><th>Escuela</th><th>Grado</th><th>Registro</th><th>Total</th><th>Abonado</th><th>Saldo</th><th>Estado</th></tr></thead>
+            <tbody>
+              {filtrados.map((e) => {
+                const t = estudianteTotales(e);
+                return (
+                  <tr key={e.id}>
+                    <td className="font-display fw-bold" style={{ fontSize: 12 }}>{e.pedido}</td>
+                    <td className="font-display fw-semibold" style={{ fontSize: 13 }}>{e.nombre}</td>
+                    <td style={{ fontSize: 12 }}>{db.escuelas.find((x) => x.id === e.escuelaId)?.nombre || "—"}</td>
+                    <td style={{ fontSize: 12 }}>{e.grado} “{e.seccion}”</td>
+                    <td style={{ fontSize: 12 }}>{fmtFecha(e.fechaRegistro)}</td>
+                    <td className="font-display fw-semibold tabular-nums" style={{ fontSize: 12.5 }}>{fmtUSD(t.total)}</td>
+                    <td className="tabular-nums" style={{ color: "var(--ok)", fontSize: 12.5 }}>{fmtUSD(t.abonado)}</td>
+                    <td className="font-display fw-bold tabular-nums" style={{ color: t.saldo > 0 ? "var(--danger)" : "var(--ok)", fontSize: 12.5 }}>{fmtUSD(t.saldo)}</td>
+                    <td><Badge tone={estadoPagoTone(t.estadoPago)} dot>{t.estadoPago}</Badge></td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+        {filtrados.length === 0 && <EmptyState icon={BarChart3} title="Sin resultados" text="Ajusta los filtros para ver el detalle." />}
+      </div>
+    </div>
   );
 }
 
-/* ============ USUARIOS — Roles y accesos del equipo JyG ============ */
+/* ============================================================
+   USUARIOS — roles, accesos y equipo
+   ============================================================ */
+const uVacio = (): Usuario => ({ id: "", nombre: "", usuario: "", rol: "operador", activo: true });
+
 export function Usuarios() {
-  const { db, saveUsuario, deleteUsuario, confirm, success, toast, user: yo, setRolPermisos, setRolActivo } = useApp();
+  const { db, user, saveUsuario, deleteUsuario, setCurrentUser, setRolPermisos, setRolActivo, confirm, success, toast } = useApp();
+  const [rolSel, setRolSel] = useState<Rol>("admin");
   const [form, setForm] = useState<Usuario | null>(null);
-  const [selRol, setSelRol] = useState<Rol>("admin");
-  const [guardado, setGuardado] = useState(false);
+  const [guardado, setGuardado] = useState(0);
+  const [verMatriz, setVerMatriz] = useState(true);
 
-  /* Accesos actuales del rol seleccionado (editados o por defecto) */
-  const accesosSel = db.config.rolesPermisos?.[selRol] ?? (ACCESOS_DEFAULT[selRol] as string[]);
-  const rolSel = ROLES_INFO.find((r) => r.id === selRol)!;
-  const rolSelActivo = db.config.rolesActivos?.[selRol] !== false;
+  const permisos = (rol: Rol) => db.config.rolesPermisos?.[rol] ?? ACCESOS_DEFAULT[rol];
+  const rolActivo = (rol: Rol) => db.config.rolesActivos?.[rol] !== false;
+  const flash = () => { setGuardado(Date.now()); setTimeout(() => setGuardado(0), 1600); };
 
-  const flashGuardado = () => { setGuardado(true); setTimeout(() => setGuardado(false), 1400); };
-
-  const toggleModulo = (ruta: string) => {
-    const nuevo = accesosSel.includes(ruta) ? accesosSel.filter((r) => r !== ruta) : [...accesosSel, ruta];
-    setRolPermisos(selRol, nuevo);
-    flashGuardado();
+  const togglePermiso = (rol: Rol, ruta: string) => {
+    const actual = permisos(rol);
+    setRolPermisos(rol, actual.includes(ruta) ? actual.filter((r) => r !== ruta) : [...actual, ruta]);
+    flash();
   };
-  const marcarTodos = (on: boolean) => {
-    setRolPermisos(selRol, on ? [...TODOS_MODULOS] : []);
-    flashGuardado();
-  };
-  const toggleRol = async (rol: Rol, activo: boolean) => {
-    if (!activo) {
-      const afectados = db.usuarios.filter((u) => u.rol === rol && u.activo).length;
-      const ok = await confirm({
-        title: "¿Está seguro de desactivar este rol?",
-        message: afectados > 0
-          ? `${afectados} usuario(s) con el rol "${ROL_LABEL[rol]}" perderán el acceso al sistema.`
-          : `El rol "${ROL_LABEL[rol]}" quedará sin acceso al sistema.`,
-        confirmText: "Desactivar", danger: true,
-      });
+  const toggleRol = async (rol: Rol) => {
+    const activos = db.usuarios.filter((u) => u.rol === rol && u.activo).length;
+    const encender = !rolActivo(rol);
+    if (!encender && activos > 0) {
+      const ok = await confirm({ title: "¿Desactivar este rol?", message: `${activos} usuario(s) con rol ${ROL_LABEL[rol]} perderán el acceso al sistema.`, confirmText: "Sí, desactivar", danger: true });
       if (!ok) return;
     }
-    setRolActivo(rol, activo);
-    toast(activo ? `Rol ${ROL_LABEL[rol]} activado` : `Rol ${ROL_LABEL[rol]} desactivado`, activo ? "ok" : "warn");
+    setRolActivo(rol, encender);
+    flash();
   };
-
-  const guardarUsuario = async () => {
-    if (!form || !form.nombre.trim()) { toast("El nombre es obligatorio", "err"); return; }
+  const guardarU = async () => {
+    if (!form || !form.nombre.trim() || !form.usuario.trim()) { toast("Completa nombre y usuario", "err"); return; }
     const ok = await confirm({ title: "¿Desea guardar este registro?", message: "Verifique la información antes de continuar.", confirmText: "Sí, Guardar" });
     if (!ok) return;
-    saveUsuario({ ...form, id: form.id || uid(), usuario: form.usuario || form.nombre.toLowerCase().split(" ")[0] });
+    saveUsuario({ ...form, id: form.id || uid() });
     success();
     setForm(null);
   };
-  const eliminarUsuario = async (u: Usuario) => {
-    const ok = await confirm({ title: "¿Está seguro de eliminar este registro?", message: `Se eliminará al usuario "${u.nombre}".`, confirmText: "Eliminar", danger: true });
+  const eliminarU = async (u: Usuario) => {
+    if (u.id === user.id) { toast("No puedes eliminar al usuario en sesión", "err"); return; }
+    const ok = await confirm({ title: "¿Está seguro de eliminar este registro?", message: `Se eliminará a "${u.nombre}".`, confirmText: "Eliminar", danger: true });
     if (!ok) return;
     deleteUsuario(u.id);
     toast("Usuario eliminado", "warn");
+  };
+  const cambiarRol = async (u: Usuario, rol: Rol) => {
+    const ok = await confirm({ title: "¿Desea guardar este registro?", message: `${u.nombre} pasará a tener el rol ${ROL_LABEL[rol]}.`, confirmText: "Sí, Guardar" });
+    if (!ok) return;
+    saveUsuario({ ...u, rol });
+    success("Rol actualizado");
   };
 
   return (
@@ -95,63 +256,47 @@ export function Usuarios() {
         <div>
           <div className="crumb">Administración</div>
           <h1>Usuarios</h1>
-          <p style={{ fontSize: 13.5, margin: "4px 0 0", color: "var(--ink-soft)" }}>Roles y accesos del equipo JyG</p>
+          <p style={{ fontSize: 13.5, margin: "4px 0 0", color: "var(--ink-soft)" }}>Roles y accesos del equipo JyG — los cambios se guardan al instante</p>
         </div>
-        <button className="btn btn-primary" onClick={() => setForm({ id: "", nombre: "", usuario: "", rol: "operador", activo: true })}><Plus size={16} /> Nuevo usuario</button>
+        <button className="btn btn-primary" onClick={() => setForm(uVacio())}><Plus size={16} /> Nuevo usuario</button>
       </div>
 
-      {/* ---------- Sesión actual ---------- */}
-      <div className="sess-card reveal">
-        <span className="user-avatar">{yo.nombre.split(" ").map((p) => p[0]).slice(0, 2).join("")}</span>
-        <div className="flex-grow-1" style={{ minWidth: 0 }}>
-          <div className="d-flex align-items-center gap-2 flex-wrap">
-            <span className="font-display fw-bold" style={{ fontSize: 15 }}>{yo.nombre}</span>
-            <Badge tone="blue">Sesión actual</Badge>
-          </div>
-          <div style={{ fontSize: 12, color: "var(--ink-faint)", marginTop: 2 }}>
-            @{yo.usuario} · <b style={{ color: "var(--ink-soft)" }}>{ROL_LABEL[yo.rol]}</b> ·{" "}
-            {db.config.rolesActivos?.[yo.rol] === false
-              ? <span style={{ color: "var(--danger)" }}>rol desactivado</span>
-              : <>{(db.config.rolesPermisos?.[yo.rol] ?? (ACCESOS_DEFAULT[yo.rol] as string[])).length} módulos activos</>}
-          </div>
+      {/* Sesión actual */}
+      <div className="card p-3 p-md-4 mb-3 d-flex align-items-center gap-3 flex-wrap" style={{ borderLeft: "4px solid var(--jyg-gold)" }}>
+        <span className="d-flex align-items-center justify-content-center rounded-3 font-display fw-bold" style={{ width: 48, height: 48, background: "linear-gradient(150deg,var(--jyg-navy),#0b2e52)", color: "#ffd970", fontSize: 16 }}>{user.nombre.split(" ").map((p) => p[0]).slice(0, 2).join("")}</span>
+        <div className="flex-grow-1" style={{ minWidth: 160 }}>
+          <div className="font-display fw-bold" style={{ fontSize: 15.5 }}>{user.nombre} <Badge tone="gold">Sesión actual</Badge></div>
+          <div style={{ fontSize: 12, color: "var(--ink-soft)" }}>@{user.usuario} · {ROL_LABEL[user.rol]} · {permisos(user.rol).length} de {TODOS_MODULOS.length} módulos activos</div>
         </div>
-        <ShieldCheck size={26} style={{ color: "var(--jyg-gold-deep)", flexShrink: 0 }} />
+        <span className="d-flex align-items-center gap-2" style={{ fontSize: 12, color: "var(--ok)", fontWeight: 700 }}>
+          <span className="dot" style={{ background: "var(--ok)" }} /> En línea
+        </span>
       </div>
 
-      {/* ---------- Panel de roles (switch on/off por rol) ---------- */}
-      <SectionHead
-        title="Roles del equipo"
-        desc="Activa o desactiva un rol con su switch · haz clic en la tarjeta para editar sus accesos"
-        actions={guardado ? <Badge tone="green" dot>Guardado</Badge> : undefined}
-      />
-      <div className="row g-3 mb-4">
+      {/* Tarjetas de rol con switch */}
+      <div className="row g-3 mb-3">
         {ROLES_INFO.map((r, i) => {
-          const Ico = ICONOS[r.icon];
-          const activo = db.config.rolesActivos?.[r.id] !== false;
-          const rutas = db.config.rolesPermisos?.[r.id] ?? (ACCESOS_DEFAULT[r.id] as string[]);
-          const usuariosRol = db.usuarios.filter((u) => u.rol === r.id).length;
-          const seleccionado = selRol === r.id;
+          const nUsers = db.usuarios.filter((u) => u.rol === r.id && u.activo).length;
+          const activo = rolActivo(r.id);
+          const nPermisos = permisos(r.id).length;
+          const sel = rolSel === r.id;
           return (
             <div key={r.id} className="col-12 col-md-6 col-xl-3">
-              <div
-                className={`rol-card reveal ${seleccionado ? "sel" : ""} ${activo ? "" : "off"}`}
-                style={{ animationDelay: `${i * 60}ms`, ...(seleccionado ? { borderColor: r.color } : {}) }}
-                onClick={() => setSelRol(r.id)}
-                role="button"
-                tabIndex={0}
-              >
-                <div className="d-flex align-items-start justify-content-between w-100">
-                  <span className="rol-ic" style={{ background: `color-mix(in srgb, ${r.color} 14%, transparent)`, color: r.color }}>
-                    <Ico size={21} />
+              <div className={`role-card reveal h-100 ${sel ? "sel" : ""}`} style={{ ["--rc" as any]: r.color, animationDelay: `${i * 60}ms`, opacity: activo ? 1 : 0.55 }} onClick={() => setRolSel(r.id)}>
+                <div className="d-flex align-items-center gap-2">
+                  <span className="d-flex align-items-center justify-content-center rounded-3" style={{ width: 40, height: 40, background: `color-mix(in srgb, ${r.color} 14%, transparent)`, color: r.color }}><i className={`bi bi-${r.icon}`} style={{ fontSize: 18 }} /></span>
+                  <div className="flex-grow-1">
+                    <div className="font-display fw-bold" style={{ fontSize: 14 }}>{r.label}</div>
+                    <div style={{ fontSize: 11, color: "var(--ink-faint)" }}>{r.desc}</div>
+                  </div>
+                  <span onClick={(e) => e.stopPropagation()}>
+                    <Switch checked={activo} onChange={() => void toggleRol(r.id)} />
                   </span>
-                  <Switch size="lg" on={activo} onToggle={() => toggleRol(r.id, !activo)} label={`Activar rol ${r.label}`} />
                 </div>
-                <div className="font-display fw-bold mt-2" style={{ fontSize: 15.5, color: activo ? "var(--ink)" : "var(--ink-faint)" }}>{r.label}</div>
-                <div style={{ fontSize: 11.5, color: "var(--ink-faint)", marginTop: 1, lineHeight: 1.35 }}>{r.desc}</div>
-                <div className="d-flex align-items-center gap-2 mt-3 flex-wrap">
-                  <span className="rol-stat"><Users size={12} /> {usuariosRol}</span>
-                  <span className="rol-stat"><Check size={12} /> {activo ? rutas.length : 0} módulos</span>
-                  {seleccionado && <Badge tone="blue" className="ms-auto">Editando</Badge>}
+                <div className="d-flex gap-2 flex-wrap mt-1">
+                  <Badge tone="blue"><Users size={11} /> {nUsers} usuarios</Badge>
+                  <Badge tone={activo ? "green" : "slate"}>{nPermisos} módulos</Badge>
+                  {sel && <Badge tone="gold">Editando accesos</Badge>}
                 </div>
               </div>
             </div>
@@ -159,121 +304,142 @@ export function Usuarios() {
         })}
       </div>
 
-      {/* ---------- Matriz de accesos del rol seleccionado ---------- */}
-      <div className="card p-4 mb-4 reveal" style={{ borderTop: `3px solid ${rolSel.color}` }}>
-        <div className="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-3">
-          <div className="d-flex align-items-center gap-2">
-            <span className="rol-ic" style={{ background: `color-mix(in srgb, ${rolSel.color} 14%, transparent)`, color: rolSel.color, width: 34, height: 34 }}>
-              {React.createElement(ICONOS[rolSel.icon], { size: 17 })}
-            </span>
-            <div>
-              <div className="font-display fw-bold" style={{ fontSize: 15.5 }}>Accesos de {rolSel.label}</div>
-              <div style={{ fontSize: 12, color: "var(--ink-faint)" }}>
-                {rolSelActivo ? `${accesosSel.length} de ${TODOS_MODULOS.length} módulos permitidos` : "Rol desactivado — sin acceso"}
-              </div>
+      {/* Matriz de accesos */}
+      <div className="card p-3 p-md-4 mb-3">
+        <SectionHead
+          title={`Accesos del rol: ${ROL_LABEL[rolSel]}`}
+          desc={ROL_DESC[rolSel]}
+          actions={
+            <div className="d-flex align-items-center gap-2">
+              {guardado > 0 && <Badge tone="green" dot>Guardado</Badge>}
+              <button className="btn btn-ghost btn-xs" onClick={() => setVerMatriz(!verMatriz)}>{verMatriz ? "Ocultar matriz" : "Ver matriz"}</button>
+              <button className="btn btn-soft btn-xs" onClick={() => { setRolPermisos(rolSel, [...TODOS_MODULOS]); flash(); }}>Marcar todos</button>
+              <button className="btn btn-ghost btn-xs" onClick={() => { setRolPermisos(rolSel, []); flash(); }}>Quitar todos</button>
             </div>
-          </div>
-          <div className="d-flex gap-2">
-            <button className="btn btn-soft btn-sm" onClick={() => marcarTodos(true)} disabled={!rolSelActivo}>Marcar todos</button>
-            <button className="btn btn-ghost btn-sm" onClick={() => marcarTodos(false)} disabled={!rolSelActivo}>Quitar todos</button>
-          </div>
-        </div>
-
-        <div className={rolSelActivo ? "" : "perm-disabled"}>
-          {MODULOS_GRUPOS.map((g) => {
-            const GIco = ICONOS[g.icon];
-            const activosGrupo = g.items.filter((m) => accesosSel.includes(m.ruta)).length;
-            return (
-              <div key={g.seccion} className="perm-group">
-                <div className="perm-group-head">
-                  <span className="d-flex align-items-center gap-2">
-                    <GIco size={14} style={{ color: rolSel.color }} />
-                    <span className="font-display fw-semibold" style={{ fontSize: 12.5 }}>{g.seccion}</span>
-                  </span>
-                  <span className="perm-count tabular-nums">{activosGrupo}/{g.items.length}</span>
+          }
+        />
+        {verMatriz && (
+          <div className="row g-3">
+            {MODULOS_GRUPOS.map((g) => {
+              const enGrupo = g.items.filter((i) => permisos(rolSel).includes(i.ruta)).length;
+              return (
+                <div key={g.seccion} className="col-12 col-md-6 col-xl-4">
+                  <div className="rounded-3 p-2 p-md-3 h-100" style={{ background: "var(--card-bg-2)" }}>
+                    <div className="d-flex align-items-center gap-2 mb-2">
+                      <i className={`bi bi-${g.icon}`} style={{ color: "var(--jyg-gold-deep)" }} />
+                      <span className="font-display fw-bold" style={{ fontSize: 12.5, textTransform: "uppercase", letterSpacing: 1 }}>{g.seccion}</span>
+                      <Badge tone={enGrupo === g.items.length ? "green" : enGrupo === 0 ? "red" : "amber"}>{enGrupo}/{g.items.length}</Badge>
+                    </div>
+                    <div className="d-flex flex-column">
+                      {g.items.map((m) => {
+                        const on = permisos(rolSel).includes(m.ruta);
+                        return (
+                          <div key={m.ruta} className={`perm-row ${on ? "on" : ""}`}>
+                            <span className="perm-dot" style={{ background: on ? "var(--ok)" : "var(--line)" }} />
+                            <span className="flex-grow-1" style={{ fontSize: 13 }}>{m.label}</span>
+                            <Switch checked={on} onChange={() => togglePermiso(rolSel, m.ruta)} />
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
                 </div>
-                <div className="perm-rows">
-                  {g.items.map((m) => {
-                    const on = accesosSel.includes(m.ruta);
-                    return (
-                      <div key={m.ruta} className={`perm-row ${on ? "on" : ""}`} onClick={() => rolSelActivo && toggleModulo(m.ruta)} role="button" tabIndex={0}>
-                        <span className="perm-dot" style={{ background: on ? rolSel.color : "var(--line)" }} />
-                        <span className="flex-grow-1" style={{ fontSize: 13, fontWeight: on ? 600 : 500, color: on ? "var(--ink)" : "var(--ink-faint)" }}>{m.label}</span>
-                        <Switch on={on} onToggle={() => toggleModulo(m.ruta)} label={`Permiso ${m.label}`} />
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            );
-          })}
-        </div>
+              );
+            })}
+          </div>
+        )}
       </div>
 
-      {/* ---------- Equipo ---------- */}
-      <SectionHead title="Equipo JyG" desc={`${db.usuarios.length} usuarios registrados`} />
-      <div className="row g-3">
-        {db.usuarios.map((u, i) => (
-          <div key={u.id} className="col-12 col-md-6 col-xl-4">
-            <div className="user-card reveal h-100" style={{ animationDelay: `${i * 55}ms` }}>
-              <span className={`user-avatar ${u.activo ? "" : "inactivo"}`}>{u.nombre.split(" ").map((p) => p[0]).slice(0, 2).join("")}</span>
-              <div className="user-info">
-                <div className="u-nombre">{u.nombre}{u.id === yo.id && <Badge tone="blue" className="ms-2">Tú</Badge>}</div>
-                <div className="u-login">@{u.usuario} · <Badge tone={u.rol === "admin" ? "gold" : u.rol === "cobranza" ? "red" : u.rol === "produccion" ? "green" : "blue"}>{ROL_LABEL[u.rol]}</Badge></div>
-              </div>
-              <div className="user-actions">
-                <Switch on={u.activo} onToggle={() => { saveUsuario({ ...u, activo: !u.activo }); toast(u.activo ? "Usuario desactivado" : "Usuario activado", "ok"); }} label={`Activar ${u.nombre}`} />
-                <button className="icon-btn" title="Editar" onClick={() => setForm(u)}><Pencil size={15} /></button>
-                <button className="icon-btn danger" title="Eliminar" onClick={() => eliminarUsuario(u)}><Trash2 size={15} /></button>
+      {/* Equipo */}
+      <div className="card p-3 p-md-4">
+        <SectionHead title={`Equipo JyG (${db.usuarios.length})`} desc="Activa, desactiva o reasigna el rol de cada miembro" />
+        <div className="row g-3">
+          {db.usuarios.map((u, i) => (
+            <div key={u.id} className="col-12 col-md-6 col-xl-4">
+              <div className="user-card h-100" style={{ opacity: u.activo ? 1 : 0.55 }}>
+                <span className="av" style={{ width: 44, height: 44, fontSize: 14 }}>{u.nombre.split(" ").map((p) => p[0]).slice(0, 2).join("")}</span>
+                <div className="flex-grow-1" style={{ minWidth: 0 }}>
+                  <div className="font-display fw-bold text-truncate" style={{ fontSize: 13.5 }}>{u.nombre} {u.id === user.id && <Badge tone="gold">Usted</Badge>}</div>
+                  <div style={{ fontSize: 11, color: "var(--ink-faint)" }}>@{u.usuario}</div>
+                  <select className="select mt-1" style={{ height: 30, fontSize: 12 }} value={u.rol} onChange={(e) => void cambiarRol(u, e.target.value as Rol)}>
+                    {ROLES_INFO.map((r) => <option key={r.id} value={r.id}>{r.label}</option>)}
+                  </select>
+                </div>
+                <div className="d-flex flex-column align-items-end gap-1">
+                  <Switch checked={u.activo} onChange={async (v) => {
+                    if (!v && u.id === user.id) { toast("No puedes desactivar al usuario en sesión", "err"); return; }
+                    saveUsuario({ ...u, activo: v });
+                    toast(v ? "Usuario activado" : "Usuario desactivado", v ? "ok" : "warn");
+                  }} />
+                  <div className="d-flex gap-1">
+                    <button className="icon-btn" style={{ width: 28, height: 28 }} title="Editar" onClick={() => setForm(u)}><Pencil size={12} /></button>
+                    <button className="icon-btn danger" style={{ width: 28, height: 28 }} title="Eliminar" onClick={() => void eliminarU(u)}><Trash2 size={12} /></button>
+                  </div>
+                </div>
               </div>
             </div>
-          </div>
-        ))}
+          ))}
+        </div>
       </div>
 
       {form && (
-        <Modal open onClose={() => setForm(null)} title={form.id ? "Editar usuario" : "Nuevo usuario"}
-          footer={<><button className="btn btn-ghost" onClick={() => setForm(null)}>Cancelar</button><button className="btn btn-primary" onClick={guardarUsuario}><Check size={15} /> Sí, Guardar</button></>}>
-          <div className="row g-3">
-            <Field label="Nombre" required className="col-12"><input className="input" value={form.nombre} onChange={(e) => setForm({ ...form, nombre: e.target.value })} autoFocus /></Field>
-            <Field label="Usuario" className="col-md-6"><input className="input" value={form.usuario} onChange={(e) => setForm({ ...form, usuario: e.target.value })} /></Field>
-            <Field label="Rol" className="col-md-6">
-              <select className="select" value={form.rol} onChange={(e) => setForm({ ...form, rol: e.target.value as Usuario["rol"] })}>
+        <Modal open onClose={() => setForm(null)} title={form.id ? "Editar usuario" : "Nuevo usuario"}>
+          <div className="f-grid">
+            <FormSec icon={<UserCog size={15} />}>Credenciales</FormSec>
+            <Field label="Nombre completo" required span="c-12"><input className="input" autoFocus value={form.nombre} onChange={(e) => setForm({ ...form, nombre: e.target.value })} /></Field>
+            <Field label="Usuario (login)" required span="c-6"><input className="input" value={form.usuario} onChange={(e) => setForm({ ...form, usuario: e.target.value })} /></Field>
+            <Field label="Rol" span="c-6">
+              <select className="select" value={form.rol} onChange={(e) => setForm({ ...form, rol: e.target.value as Rol })}>
                 {ROLES_INFO.map((r) => <option key={r.id} value={r.id}>{r.label}</option>)}
               </select>
             </Field>
           </div>
-          <p className="mt-3 mb-0" style={{ fontSize: 12, color: "var(--ink-faint)" }}>{ROL_DESC[form.rol]}.</p>
+          <FormFoot onCancel={() => setForm(null)} onSave={() => void guardarU()} />
         </Modal>
       )}
     </div>
   );
 }
 
-/* ============ CONFIGURACIÓN ============ */
-const peVacio = (): PaqueteEscuela => ({ id: "", escuelaId: "", nombre: "", tipoPaqueteId: "premium", precio: 40, articulos: PAQUETES.premium.incluye.map((n) => ({ nombre: n, cantidad: 1 })), nota: "", activo: true, creado: todayISO() });
+/* ============================================================
+   CONFIGURACIÓN
+   ============================================================ */
+const peVacio = (): PaqueteEscuela => ({ id: "", escuelaId: "", nombre: "", tipoPaqueteId: "premium", precio: 45, articulos: PAQUETES.premium.incluye.map((n) => ({ nombre: n, cantidad: 1 })), nota: "", activo: true, creado: todayISO() });
 
 export function Configuracion() {
-  const { db, setConfig, confirm, success, toast, tasa, refreshTasa, setRoute, savePaqueteEscuela, deletePaqueteEscuela, setOcrOpen, exportBackup, importBackup } = useApp();
+  const { db, setConfig, confirm, success, toast, tasa, refreshTasa, setOcrOpen, exportBackup, importBackup, savePaqueteEscuela, deletePaqueteEscuela } = useApp();
   const [emp, setEmp] = useState({ ...db.config.empresa });
-  const [fallback, setFallback] = useState(String(db.config.tasaManualUSD || db.config.tasaFallback));
-  const [verClaveOcr, setVerClaveOcr] = useState(false);
+  const [tasaM, setTasaM] = useState(String(db.config.tasaManualUSD || db.config.tasaFallback));
+  const [orKey, setOrKey] = useState(db.config.openRouterKey || "");
+  const [orModel, setOrModel] = useState(db.config.openRouterModel || OPENROUTER_MODELOS[0].id);
+  const [verOr, setVerOr] = useState(false);
+  const [orTest, setOrTest] = useState<"idle" | "busy" | "ok" | "fail">("idle");
   const [peForm, setPeForm] = useState<PaqueteEscuela | null>(null);
+  const [nuevoProd, setNuevoProd] = useState("");
+  const [nuevoPrecio, setNuevoPrecio] = useState("");
+  const [nuevaTalla, setNuevaTalla] = useState<"" | "letras" | "numerica">("");
+  const [nuevoItem, setNuevoItem] = useState("");
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  const adicionales = getAdicionales(db.config);
+  const grados = getGrados(db.config);
+  const secciones = getSecciones(db.config);
+  const tallas = getTallas(db.config);
 
   const guardarEmpresa = async () => {
-    const ok = await confirm({ title: "¿Desea guardar este registro?", message: "Se actualizarán los datos de la empresa en facturas y tickets.", confirmText: "Sí, Guardar" });
+    const ok = await confirm({ title: "¿Desea guardar este registro?", message: "Se actualizarán los datos de la empresa en tickets y portal.", confirmText: "Sí, Guardar" });
     if (!ok) return;
     setConfig({ empresa: emp });
     success();
   };
   const guardarTasa = async () => {
-    const n = Number(fallback);
+    const n = Number(tasaM);
     if (!n || n <= 0) { toast("Tasa inválida", "err"); return; }
-    const ok = await confirm({ title: "¿Desea guardar este registro?", message: `La tasa manual ${fmtBs(n)} por $1 quedará registrada en el historial.`, confirmText: "Sí, Guardar" });
+    const ok = await confirm({ title: "¿Desea guardar este registro?", message: `La tasa manual ${fmtBs(n)}/$ quedará activa y registrada en el historial.`, confirmText: "Sí, Guardar" });
     if (!ok) return;
     setConfig({ usarApi: false, usarTasaManual: true, tasaManualUSD: n, tasaFallback: n });
     refreshTasa();
-    success();
+    success("Tasa manual guardada");
   };
   const toggleApi = () => {
     const irApi = db.config.usarTasaManual || !db.config.usarApi;
@@ -281,9 +447,66 @@ export function Configuracion() {
     if (irApi) { toast("Consultando ve.dolarapi.com…", "ok"); refreshTasa(); }
     else toast("Usando tasa manual", "warn");
   };
-  const copiar = (texto: string, que: string) => {
-    navigator.clipboard?.writeText(texto).then(() => toast(`${que} copiado al portapapeles`, "ok")).catch(() => toast("No se pudo copiar", "err"));
+  const guardarOr = async () => {
+    const ok = await confirm({ title: "¿Desea guardar este registro?", message: "La API key y el modelo se guardarán en tu base de datos Supabase.", confirmText: "Sí, Guardar" });
+    if (!ok) return;
+    setConfig({ openRouterKey: orKey.trim(), openRouterModel: orModel });
+    success("Motor Qwen configurado");
   };
+  const probarOr = async () => {
+    const k = orKey.trim();
+    if (!k) { toast("Pega primero tu API key de OpenRouter", "warn"); return; }
+    setOrTest("busy");
+    try {
+      const r = await fetch("https://openrouter.ai/api/v1/models", { headers: { Authorization: `Bearer ${k}` } });
+      if (!r.ok) throw new Error(`OpenRouter respondió ${r.status}`);
+      const j = await r.json();
+      setOrTest("ok");
+      toast(`Conectado ✓ · ${j?.data?.length || "varios"} modelos disponibles`, "ok");
+    } catch (e: any) { setOrTest("fail"); toast(e?.message || "No se pudo conectar", "err"); }
+  };
+  const copiar = (t: string, q: string) => { navigator.clipboard?.writeText(t).then(() => toast(`${q} copiado`, "ok")).catch(() => toast("No se pudo copiar", "err")); };
+
+  /* Catálogo editable */
+  const setCat = (lista: CatAdicional[]) => setConfig({ adicionales: lista });
+  const agregarProd = async () => {
+    const p = Number(nuevoPrecio);
+    if (!nuevoProd.trim() || !p || p <= 0) { toast("Completa nombre y precio válido", "err"); return; }
+    const ok = await confirm({ title: "¿Desea guardar este registro?", message: `Se agregará "${nuevoProd}" al catálogo de adicionales.`, confirmText: "Sí, Guardar" });
+    if (!ok) return;
+    setCat([...adicionales, { nombre: nuevoProd.trim(), precio: p, talla: nuevaTalla }]);
+    success("Producto agregado");
+    setNuevoProd(""); setNuevoPrecio(""); setNuevaTalla("");
+  };
+  const quitarProd = async (nombre: string) => {
+    const ok = await confirm({ title: "¿Está seguro de eliminar este registro?", message: `Se quitará "${nombre}" del catálogo.`, confirmText: "Eliminar", danger: true });
+    if (!ok) return;
+    setCat(adicionales.filter((a) => a.nombre !== nombre));
+    toast("Producto eliminado", "warn");
+  };
+  const editarPrecioProd = (nombre: string, precio: number) => setCat(adicionales.map((a) => (a.nombre === nombre ? { ...a, precio } : a)));
+  const editarTallaProd = (nombre: string, talla: "" | "letras" | "numerica") => setCat(adicionales.map((a) => (a.nombre === nombre ? { ...a, talla } : a)));
+
+  /* Listas editables */
+  const agregarItem = async (tipo: "grados" | "secciones" | "tallas") => {
+    const v = nuevoItem.trim();
+    if (!v) { toast("Escribe un valor", "err"); return; }
+    const actual = tipo === "grados" ? grados : tipo === "secciones" ? secciones : tallas;
+    if (actual.includes(v)) { toast("Ese valor ya existe", "warn"); return; }
+    const ok = await confirm({ title: "¿Desea guardar este registro?", message: `Se agregará "${v}".`, confirmText: "Sí, Guardar" });
+    if (!ok) return;
+    setConfig(tipo === "grados" ? { grados: [...actual, v] } : tipo === "secciones" ? { secciones: [...actual, v] } : { tallas: [...actual, v] });
+    success();
+    setNuevoItem("");
+  };
+  const quitarItem = async (tipo: "grados" | "secciones" | "tallas", v: string) => {
+    const ok = await confirm({ title: "¿Está seguro de eliminar este registro?", message: `Se quitará "${v}".`, confirmText: "Eliminar", danger: true });
+    if (!ok) return;
+    const actual = tipo === "grados" ? grados : tipo === "secciones" ? secciones : tallas;
+    setConfig(tipo === "grados" ? { grados: actual.filter((x) => x !== v) } : tipo === "secciones" ? { secciones: actual.filter((x) => x !== v) } : { tallas: actual.filter((x) => x !== v) });
+    toast("Eliminado", "warn");
+  };
+
   const guardarPe = async () => {
     if (!peForm || !peForm.nombre.trim() || !peForm.escuelaId) { toast("Completa nombre y escuela", "err"); return; }
     const ok = await confirm({ title: "¿Desea guardar este registro?", message: "Verifique la información antes de continuar.", confirmText: "Sí, Guardar" });
@@ -299,231 +522,328 @@ export function Configuracion() {
     toast("Paquete eliminado", "warn");
   };
 
+  const ListaEditor = ({ tipo, titulo, icono, items }: { tipo: "grados" | "secciones" | "tallas"; titulo: string; icono: React.ReactNode; items: string[] }) => (
+    <div className="rounded-3 p-3 h-100" style={{ background: "var(--card-bg-2)" }}>
+      <div className="d-flex align-items-center gap-2 mb-2">
+        {icono}
+        <span className="font-display fw-bold" style={{ fontSize: 13 }}>{titulo}</span>
+        <Badge tone="blue">{items.length}</Badge>
+      </div>
+      <div className="d-flex flex-wrap gap-1 mb-2">
+        {items.map((g) => (
+          <span key={g} className="badge" style={{ background: "var(--card-bg)", color: "var(--ink-soft)", border: "1px solid var(--line)" }}>
+            {g}
+            <button className="border-0 bg-transparent p-0 d-flex" style={{ color: "var(--ink-faint)", cursor: "pointer" }} onClick={() => void quitarItem(tipo, g)}><X size={10} /></button>
+          </span>
+        ))}
+      </div>
+      <div className="d-flex gap-1">
+        <input className="input" style={{ height: 32, fontSize: 12 }} placeholder="Nuevo…" value={nuevoItem} onChange={(e) => setNuevoItem(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") void agregarItem(tipo); }} />
+        <button className="btn btn-soft btn-xs" onClick={() => void agregarItem(tipo)}><Plus size={12} /></button>
+      </div>
+    </div>
+  );
+
   return (
     <div className="page">
       <div className="page-head">
         <div>
           <div className="crumb">Sistema</div>
           <h1>Configuración</h1>
-          <p style={{ fontSize: 13.5, margin: "4px 0 0", color: "var(--ink-soft)" }}>Empresa, tasa del día, cuenta OCR y paquetes por escuela</p>
+          <p style={{ fontSize: 13.5, margin: "4px 0 0", color: "var(--ink-soft)" }}>Empresa, tasa del día, motor de escaneo, catálogos y respaldo</p>
+        </div>
+        <div className="d-flex gap-2 flex-wrap">
+          <button className="btn btn-ghost" onClick={() => { downloadFile(`respaldo-jyg-${todayISO()}.json`, exportBackup(), "application/json"); toast("Respaldo descargado", "ok"); }}><Download size={15} /> Exportar respaldo</button>
+          <button className="btn btn-primary" onClick={() => fileRef.current?.click()}><Upload size={15} /> Restaurar</button>
+          <input ref={fileRef} type="file" accept="application/json" className="d-none" onChange={async (e) => {
+            const f = e.target.files?.[0]; e.target.value = "";
+            if (!f) return;
+            const ok = await confirm({ title: "¿Restaurar este respaldo?", message: "Se reemplazarán todos los datos actuales del navegador.", confirmText: "Sí, Restaurar", danger: true });
+            if (!ok) return;
+            const texto = await f.text();
+            if (importBackup(texto)) success("Respaldo restaurado"); else toast("El archivo no es un respaldo válido", "err");
+          }} />
         </div>
       </div>
 
-      <div className="row g-4">
+      <div className="row g-3">
         {/* Empresa */}
         <div className="col-12 col-xl-6">
-          <div className="card p-4 h-100">
-            <SectionHead title="Datos de la empresa" desc="Aparecen en el ticket de facturación" />
-            <div className="row g-3">
-              <Field label="Nombre" className="col-md-6"><input className="input" value={emp.nombre} onChange={(e) => setEmp({ ...emp, nombre: e.target.value })} /></Field>
-              <Field label="RIF" className="col-md-6"><input className="input" value={emp.rif} onChange={(e) => setEmp({ ...emp, rif: e.target.value })} /></Field>
-              <Field label="Teléfono" className="col-md-6"><input className="input" value={emp.telefono} onChange={(e) => setEmp({ ...emp, telefono: e.target.value })} /></Field>
-              <Field label="Dirección" className="col-md-6"><input className="input" value={emp.direccion} onChange={(e) => setEmp({ ...emp, direccion: e.target.value })} /></Field>
+          <div className="card p-3 p-md-4 h-100">
+            <SectionHead title="Datos de la empresa" desc="Aparecen en tickets, portal y mensajes" />
+            <div className="f-grid">
+              <Field label="Nombre" span="c-6"><input className="input" value={emp.nombre} onChange={(e) => setEmp({ ...emp, nombre: e.target.value })} /></Field>
+              <Field label="RIF" span="c-6"><input className="input" value={emp.rif} onChange={(e) => setEmp({ ...emp, rif: e.target.value })} /></Field>
+              <Field label="Dirección" span="c-12"><input className="input" value={emp.direccion} onChange={(e) => setEmp({ ...emp, direccion: e.target.value })} /></Field>
+              <Field label="Teléfono" span="c-6"><input className="input" value={emp.telefono} onChange={(e) => setEmp({ ...emp, telefono: e.target.value })} /></Field>
+              <span className="c-6 d-flex align-items-end"><button className="btn btn-primary w-100" onClick={() => void guardarEmpresa()}><Save size={15} /> Guardar empresa</button></span>
             </div>
-            <button className="btn btn-primary btn-sm mt-3" onClick={guardarEmpresa}><Check size={14} /> Guardar empresa</button>
           </div>
         </div>
 
-        {/* Tasa */}
+        {/* Tasa del día */}
         <div className="col-12 col-xl-6">
-          <div className="card p-4 h-100">
-            <SectionHead title="Tasa del día" desc={`Actual: ${fmtBs(tasa.usd)} · fuente ${tasa.source}`} />
-            <label className="d-flex align-items-center gap-2 mb-3" style={{ fontSize: 13, fontWeight: 600, cursor: "pointer", color: "var(--ink-soft)" }}>
-              <input type="checkbox" checked={db.config.usarApi && !db.config.usarTasaManual} onChange={toggleApi} /> Usar tasa automática de DolarAPI
-            </label>
-            <div className="d-flex gap-2 align-items-end">
-              <Field label="Tasa manual (Bs por $1)" className="flex-grow-1">
-                <input type="number" className="input" value={fallback} onChange={(e) => setFallback(e.target.value)} />
+          <div className="card p-3 p-md-4 h-100">
+            <SectionHead title="Tasa del día" desc="Fuente oficial BCV vía ve.dolarapi.com" actions={
+              <Badge tone={db.config.usarTasaManual ? "amber" : "green"} dot>{db.config.usarTasaManual ? "Tasa manual" : tasa.apiOk ? "DolarAPI en vivo" : "Respaldo"}</Badge>
+            } />
+            <div className="d-flex align-items-center gap-3 p-3 rounded-3 mb-3" style={{ background: "var(--card-bg-2)" }}>
+              <div>
+                <div className="font-display fw-bold tabular-nums" style={{ fontSize: 24, color: "var(--jyg-navy)" }}>{fmtBs(tasa.usd)}<small style={{ fontSize: 11, opacity: .6 }}> /$</small></div>
+                {tasa.eur > 0 && <div className="tabular-nums" style={{ fontSize: 13, color: "var(--jyg-gold-deep)" }}>{fmtBs(tasa.eur)} /€</div>}
+              </div>
+              <div className="ms-auto text-end" style={{ fontSize: 11, color: "var(--ink-faint)" }}>
+                {tasa.apiOk ? "Actualizada desde la API" : "Última tasa conocida"}<br />
+                <a href={API_DOLARES} target="_blank" rel="noreferrer" style={{ color: "var(--jyg-navy)" }}>dolares</a> · <a href={API_EUROS} target="_blank" rel="noreferrer" style={{ color: "var(--jyg-navy)" }}>euros</a>
+              </div>
+            </div>
+            <div className="d-flex gap-2 flex-wrap align-items-end">
+              <div className="flex-grow-1" style={{ minWidth: 140 }}>
+                <label className="form-label">Tasa manual (Bs por $1)</label>
+                <input type="number" step="0.01" className="input" value={tasaM} onChange={(e) => setTasaM(e.target.value)} />
+              </div>
+              <button className="btn btn-primary" onClick={() => void guardarTasa()}><Save size={15} /> Guardar manual</button>
+              <button className="btn btn-soft" onClick={toggleApi}>{db.config.usarTasaManual || !db.config.usarApi ? "Volver a la API" : "Usar manual"}</button>
+            </div>
+          </div>
+        </div>
+
+        {/* Motor de escaneo Qwen */}
+        <div className="col-12 col-xl-6">
+          <div className="card p-3 p-md-4 h-100" style={{ borderTop: "3px solid var(--jyg-gold)" }}>
+            <SectionHead title="Motor de Escaneo · Qwen" desc="IA vía OpenRouter — la API key se guarda en Supabase" actions={
+              <Badge tone={(db.config.openRouterKey || "").trim() ? "green" : "amber"} dot>{(db.config.openRouterKey || "").trim() ? "Configurado" : "Sin API key"}</Badge>
+            } />
+            <Field label="API Key de OpenRouter" hint="sk-or-v1-… · consíguela gratis en openrouter.ai/keys">
+              <div className="d-flex gap-1">
+                <input type={verOr ? "text" : "password"} className="input" style={{ fontFamily: "ui-monospace, monospace", fontSize: 12 }} placeholder="sk-or-v1-…" value={orKey} onChange={(e) => setOrKey(e.target.value)} />
+                <button className="icon-btn" title={verOr ? "Ocultar" : "Mostrar"} onClick={() => setVerOr(!verOr)}>{verOr ? <EyeOff size={15} /> : <Eye size={15} />}</button>
+              </div>
+            </Field>
+            <div className="mt-3">
+              <Field label="Modelo Qwen">
+                <select className="select" value={orModel} onChange={(e) => setOrModel(e.target.value)}>
+                  {OPENROUTER_MODELOS.map((m) => <option key={m.id} value={m.id}>{m.nombre}{m.recomendado ? " · recomendado" : ""} — {m.desc}</option>)}
+                </select>
               </Field>
-              <button className="btn btn-primary" onClick={guardarTasa}><Check size={15} /> Aplicar</button>
             </div>
-            <p className="mt-2 mb-0" style={{ fontSize: 12, color: "var(--ink-faint)" }}>
-              APIs: <a href={API_DOLARES} target="_blank" rel="noreferrer" style={{ color: "var(--jyg-navy)" }}>dolares</a> · <a href={API_EUROS} target="_blank" rel="noreferrer" style={{ color: "var(--jyg-navy)" }}>euros</a>
-            </p>
+            <div className="d-flex gap-2 flex-wrap mt-3">
+              <button className="btn btn-primary btn-sm" onClick={() => void guardarOr()}><Save size={14} /> Guardar en Supabase</button>
+              <button className="btn btn-ghost btn-sm" onClick={() => void probarOr()} disabled={orTest === "busy"}>
+                <Plug size={14} className={orTest === "busy" ? "spin" : ""} />
+                {orTest === "busy" ? "Probando…" : orTest === "ok" ? "Conectado ✓" : orTest === "fail" ? "Reintentar" : "Probar conexión"}
+              </button>
+              <button className="btn btn-soft btn-sm" onClick={() => setOcrOpen(true)}><ScanLine size={14} /> Abrir escáner</button>
+            </div>
           </div>
         </div>
 
-        {/* Cuenta OCR */}
+        {/* Cuenta de servicio OCR (referencia) */}
         <div className="col-12 col-xl-6">
-          <div className="card p-4 h-100">
-            <SectionHead title="Cuenta de servicio OCR" desc="Credenciales de Google Cloud Vision" actions={<Badge tone="green" dot>Conectada</Badge>} />
+          <div className="card p-3 p-md-4 h-100">
+            <SectionHead title="Cuenta de servicio OCR" desc="Credenciales de Google Cloud Vision (referencia)" actions={<Badge tone="green" dot>Activa</Badge>} />
             <div className="d-flex flex-column gap-2" style={{ fontSize: 13 }}>
-              <div className="d-flex align-items-center gap-2">
-                <span className="flex-grow-1 text-truncate" style={{ color: "var(--ink-soft)" }}>{OCR_CRED.correo}</span>
-                <button className="icon-btn" title="Copiar" onClick={() => copiar(OCR_CRED.correo, "Correo")}><Copy size={14} /></button>
+              <div className="d-flex align-items-center gap-2 p-2 rounded-3" style={{ background: "var(--card-bg-2)" }}>
+                <KeyRound size={14} style={{ color: "var(--jyg-navy)" }} />
+                <span className="flex-grow-1 text-truncate tabular-nums" style={{ color: "var(--ink-soft)", fontSize: 12 }}>ocr-esca@thermal-scene-505819-t0.iam.gserviceaccount.com</span>
+                <button className="icon-btn" style={{ width: 28, height: 28 }} title="Copiar" onClick={() => copiar("ocr-esca@thermal-scene-505819-t0.iam.gserviceaccount.com", "Correo")}><Copy size={12} /></button>
               </div>
-              <div className="d-flex align-items-center gap-2">
-                <span className="flex-grow-1 text-truncate tabular-nums" style={{ color: "var(--ink-soft)" }}>ID: {OCR_CRED.id}</span>
-                <button className="icon-btn" title="Copiar" onClick={() => copiar(OCR_CRED.id, "ID")}><Copy size={14} /></button>
-              </div>
-              <div className="d-flex align-items-center gap-2">
-                <span className="flex-grow-1 text-truncate tabular-nums" style={{ color: "var(--ink-soft)" }}>{verClaveOcr ? OCR_CRED.clave : "•".repeat(28)}</span>
-                <button className="icon-btn" title={verClaveOcr ? "Ocultar" : "Mostrar"} onClick={() => setVerClaveOcr(!verClaveOcr)}>{verClaveOcr ? <EyeOff size={14} /> : <Eye size={14} />}</button>
-                <button className="icon-btn" title="Copiar" onClick={() => copiar(OCR_CRED.clave, "Clave")}><Copy size={14} /></button>
-              </div>
+              <p className="m-0" style={{ fontSize: 11.5, color: "var(--ink-faint)" }}>
+                <ShieldCheck size={12} style={{ verticalAlign: -2, color: "var(--ok)" }} /> La clave privada no se guarda en el código por seguridad — se administra desde Google Cloud IAM.
+              </p>
             </div>
-            <button className="btn btn-soft btn-sm mt-3" onClick={() => setOcrOpen(true)}><ScanLine size={14} /> Abrir escáner OCR</button>
           </div>
         </div>
 
-        {/* Respaldo */}
-        <div className="col-12 col-xl-6">
-          <div className="card p-4 h-100">
-            <SectionHead title="Respaldo local" desc="Exporta o restaura la base en este navegador" />
-            <div className="d-flex gap-2 flex-wrap">
-              <button className="btn btn-primary btn-sm" onClick={() => { downloadFile(`respaldo-jyg-${todayISO()}.json`, exportBackup(), "application/json"); toast("Respaldo descargado", "ok"); }}><Download size={14} /> Exportar JSON</button>
-              <label className="btn btn-ghost btn-sm mb-0" style={{ cursor: "pointer" }}>
-                <Upload size={14} /> Restaurar…
-                <input type="file" accept="application/json" className="d-none" onChange={async (e) => {
-                  const f = e.target.files?.[0]; if (!f) return;
-                  const ok = await confirm({ title: "¿Restaurar respaldo?", message: "Se reemplazarán los datos actuales por los del archivo.", confirmText: "Sí, Restaurar" });
-                  if (!ok) { e.target.value = ""; return; }
-                  const r = new FileReader();
-                  r.onload = () => { if (importBackup(r.result as string)) success("Respaldo restaurado"); else toast("Archivo inválido", "err"); };
-                  r.readAsText(f); e.target.value = "";
-                }} />
-              </label>
+        {/* Catálogo de adicionales editable */}
+        <div className="col-12">
+          <div className="card p-3 p-md-4">
+            <SectionHead title="Catálogo de adicionales" desc="Edita precios y tallas, agrega o elimina productos — los cambios se guardan al instante" actions={<Badge tone="blue">{adicionales.length} productos</Badge>} />
+            <div className="table-responsive">
+              <table className="tbl">
+                <thead><tr><th>Producto</th><th style={{ width: 130 }}>Precio USD</th><th style={{ width: 190 }}>Talla</th><th style={{ width: 70 }} className="text-end">Acción</th></tr></thead>
+                <tbody>
+                  {adicionales.map((a) => (
+                    <tr key={a.nombre}>
+                      <td className="font-display fw-semibold" style={{ fontSize: 13 }}>{a.nombre}</td>
+                      <td>
+                        <input type="number" step="0.5" min="0" className="input" style={{ height: 32, width: 110, fontSize: 12.5 }} defaultValue={a.precio} onBlur={(e) => { const v = Number(e.target.value); if (v > 0 && v !== a.precio) editarPrecioProd(a.nombre, v); }} />
+                      </td>
+                      <td>
+                        <div className="d-flex rounded-pill p-1 gap-1" style={{ background: "var(--card-bg-2)", width: "fit-content" }}>
+                          {([["", "Sin"], ["letras", "XS–XXL"], ["numerica", "N°"]] as const).map(([v, l]) => (
+                            <button key={v} onClick={() => editarTallaProd(a.nombre, v)} className="border-0 font-display fw-semibold rounded-pill" style={{ fontSize: 10.5, padding: "3px 9px", background: a.talla === v ? "var(--card-bg)" : "transparent", color: a.talla === v ? "var(--jyg-navy)" : "var(--ink-faint)", boxShadow: a.talla === v ? "var(--shadow-1)" : "none", cursor: "pointer" }}>{l}</button>
+                          ))}
+                        </div>
+                      </td>
+                      <td className="text-end"><button className="icon-btn danger" style={{ width: 28, height: 28 }} title="Eliminar" onClick={() => void quitarProd(a.nombre)}><Trash2 size={12} /></button></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
-            <p className="mt-2 mb-0" style={{ fontSize: 12, color: "var(--ink-faint)" }}>Para respaldo en la nube usa Supabase en Integraciones.</p>
+            <div className="d-flex gap-2 flex-wrap mt-3 align-items-end">
+              <div><label className="form-label">Nuevo producto</label><input className="input" style={{ width: 190 }} placeholder="Ej: Gorro de grado" value={nuevoProd} onChange={(e) => setNuevoProd(e.target.value)} /></div>
+              <div><label className="form-label">Precio USD</label><input type="number" step="0.5" min="0" className="input" style={{ width: 110 }} placeholder="0.00" value={nuevoPrecio} onChange={(e) => setNuevoPrecio(e.target.value)} /></div>
+              <div>
+                <label className="form-label">Talla</label>
+                <select className="select" style={{ width: 130 }} value={nuevaTalla} onChange={(e) => setNuevaTalla(e.target.value as any)}>
+                  <option value="">Sin talla</option><option value="letras">Letras (XS–XXL)</option><option value="numerica">Numérica</option>
+                </select>
+              </div>
+              <button className="btn btn-gold" onClick={() => void agregarProd()}><Plus size={15} /> Agregar producto</button>
+            </div>
           </div>
         </div>
-      </div>
 
-      {/* Paquetes por escuela */}
-      <div className="card p-4 mt-4">
-        <SectionHead title="Paquetes por Escuela" desc="Asigna paquetes personalizados con nombre, tipo, precio y artículos a cada plantel" actions={<button className="btn btn-primary btn-sm" onClick={() => setPeForm(peVacio())}><Plus size={14} /> Asignar paquete</button>} />
-        {db.paquetesEscuelas.length === 0 ? (
-          <p style={{ fontSize: 13, color: "var(--ink-faint)" }}>Aún no hay paquetes asignados a escuelas.</p>
-        ) : (
-          db.escuelas.map((es) => {
-            const pkgs = db.paquetesEscuelas.filter((p) => p.escuelaId === es.id);
-            if (!pkgs.length) return null;
-            return (
-              <div key={es.id} className="mb-3">
-                <div className="font-display fw-semibold mb-2" style={{ fontSize: 13.5, color: "var(--jyg-navy)" }}>{es.nombre}</div>
-                <div className="row g-3">
-                  {pkgs.map((p) => (
+        {/* Grados, secciones y tallas */}
+        <div className="col-12">
+          <div className="card p-3 p-md-4">
+            <SectionHead title="Grados, Secciones y Tallas" desc="Listas desplegables del sistema — agrega o elimina valores" />
+            <div className="row g-3">
+              <div className="col-12 col-md-4"><ListaEditor tipo="grados" titulo="Grados" icono={<GraduationCap size={15} style={{ color: "var(--jyg-navy)" }} />} items={grados} /></div>
+              <div className="col-12 col-md-4"><ListaEditor tipo="secciones" titulo="Secciones" icono={<Users size={15} style={{ color: "var(--jyg-navy)" }} />} items={secciones} /></div>
+              <div className="col-12 col-md-4"><ListaEditor tipo="tallas" titulo="Tallas de ropa" icono={<Boxes size={15} style={{ color: "var(--jyg-navy)" }} />} items={tallas} /></div>
+            </div>
+          </div>
+        </div>
+
+        {/* Paquetes por escuela */}
+        <div className="col-12">
+          <div className="card p-3 p-md-4">
+            <SectionHead title="Paquetes por escuela" desc="Combos negociados con cada plantel, con sus artículos" actions={
+              <button className="btn btn-primary btn-sm" onClick={() => setPeForm(peVacio())}><Plus size={14} /> Asignar paquete</button>
+            } />
+            {db.paquetesEscuelas.length === 0 ? (
+              <EmptyState icon={Package} title="Sin paquetes asignados" text="Crea el primer paquete negociado por escuela." />
+            ) : (
+              <div className="row g-3">
+                {db.paquetesEscuelas.map((p) => {
+                  const es = db.escuelas.find((e) => e.id === p.escuelaId);
+                  const tipo = PAQUETES[p.tipoPaqueteId];
+                  return (
                     <div key={p.id} className="col-12 col-md-6 col-xl-4">
-                      <div className="card p-3 h-100 card-lift" style={{ background: "var(--card-bg-2)" }}>
-                        <div className="d-flex align-items-center justify-content-between">
+                      <div className="card p-3 h-100 card-lift" style={{ borderLeft: `4px solid ${tipo?.color || "var(--jyg-navy)"}`, opacity: p.activo ? 1 : 0.55 }}>
+                        <div className="d-flex align-items-center gap-2 flex-wrap">
                           <span className="font-display fw-bold" style={{ fontSize: 14 }}>{p.nombre}</span>
-                          <Badge tone={p.tipoPaqueteId === "lujo" ? "gold" : p.tipoPaqueteId === "premium" ? "green" : p.tipoPaqueteId === "basico" ? "blue" : "slate"}>{p.tipoPaqueteId}</Badge>
+                          <Badge tone={p.tipoPaqueteId === "lujo" ? "gold" : p.tipoPaqueteId === "premium" ? "green" : "slate"}>{tipo?.nombre || "Personalizado"}</Badge>
+                          <Badge tone={p.activo ? "green" : "red"} dot>{p.activo ? "Activo" : "Inactivo"}</Badge>
                         </div>
-                        <div className="font-display fw-bold tabular-nums mt-1" style={{ color: "var(--jyg-gold-deep)", fontSize: 18 }}>{fmtUSD(p.precio)}</div>
-                        <div className="d-flex flex-wrap gap-1 mt-2">
-                          {p.articulos.slice(0, 5).map((a, i) => <Badge key={i} tone="slate">{a.cantidad}× {a.nombre}</Badge>)}
-                          {p.articulos.length > 5 && <Badge tone="slate">+{p.articulos.length - 5}</Badge>}
+                        <div style={{ fontSize: 12, color: "var(--ink-soft)", margin: "4px 0" }}>{es?.nombre || "Escuela"} · <b className="font-display" style={{ color: "var(--jyg-navy)", fontSize: 16 }}>{fmtUSD(p.precio)}</b></div>
+                        <div className="d-flex flex-wrap gap-1 mb-2">
+                          {p.articulos.slice(0, 5).map((a) => <span key={a.nombre} className="badge" style={{ background: "var(--card-bg-2)", color: "var(--ink-soft)", fontSize: 10 }}>{a.cantidad}× {a.nombre}</span>)}
+                          {p.articulos.length > 5 && <span className="badge" style={{ background: "var(--card-bg-2)", color: "var(--ink-faint)", fontSize: 10 }}>+{p.articulos.length - 5}</span>}
                         </div>
-                        {p.nota && <p className="fst-italic mt-2 mb-0" style={{ fontSize: 11.5, color: "var(--ink-faint)" }}>{p.nota}</p>}
-                        <div className="d-flex gap-1 mt-2">
-                          <button className="btn btn-xs" style={{ background: p.activo ? "var(--tint-ok)" : "var(--tint-danger)", color: p.activo ? "var(--ok)" : "var(--danger)" }} onClick={() => { savePaqueteEscuela({ ...p, activo: !p.activo }); }}>{p.activo ? "Activo" : "Inactivo"}</button>
-                          <button className="icon-btn ms-auto" title="Editar" onClick={() => setPeForm(p)}><Pencil size={14} /></button>
-                          <button className="icon-btn danger" title="Eliminar" onClick={() => eliminarPe(p)}><Trash2 size={14} /></button>
+                        {p.nota && <p className="m-0 mb-2" style={{ fontSize: 11, fontStyle: "italic", color: "var(--ink-faint)" }}>{p.nota}</p>}
+                        <div className="d-flex gap-1 mt-auto">
+                          <button className="btn btn-soft btn-xs" onClick={() => setPeForm(p)}><Pencil size={11} /> Editar</button>
+                          <button className="btn btn-ghost btn-xs" onClick={() => { savePaqueteEscuela({ ...p, activo: !p.activo }); toast(p.activo ? "Paquete desactivado" : "Paquete activado", "warn"); }}>{p.activo ? "Desactivar" : "Activar"}</button>
+                          <button className="icon-btn danger" style={{ width: 26, height: 26 }} onClick={() => void eliminarPe(p)}><Trash2 size={11} /></button>
                         </div>
                       </div>
                     </div>
-                  ))}
-                </div>
+                  );
+                })}
               </div>
-            );
-          })
-        )}
+            )}
+          </div>
+        </div>
       </div>
 
       {peForm && (
-        <Modal open onClose={() => setPeForm(null)} title={peForm.id ? "Editar paquete" : "Asignar paquete a escuela"}
-          footer={<><button className="btn btn-ghost" onClick={() => setPeForm(null)}>Cancelar</button><button className="btn btn-primary" onClick={guardarPe}><Check size={15} /> Sí, Guardar</button></>}>
-          <div className="row g-3">
-            <Field label="Nombre del paquete" required className="col-md-6"><input className="input" value={peForm.nombre} onChange={(e) => setPeForm({ ...peForm, nombre: e.target.value })} autoFocus /></Field>
-            <Field label="Escuela" required className="col-md-6">
+        <Modal open onClose={() => setPeForm(null)} size="lg" title={peForm.id ? "Editar paquete por escuela" : "Asignar paquete a escuela"}>
+          <div className="f-grid">
+            <FormSec icon={<Package size={15} />}>Identificación</FormSec>
+            <Field label="Nombre del paquete" required span="c-6"><input className="input" autoFocus value={peForm.nombre} onChange={(e) => setPeForm({ ...peForm, nombre: e.target.value })} placeholder="Ej: Paquete VIP Bolívar" /></Field>
+            <Field label="Escuela" required span="c-6">
               <select className="select" value={peForm.escuelaId} onChange={(e) => setPeForm({ ...peForm, escuelaId: e.target.value })}>
                 <option value="">— Seleccione —</option>
                 {db.escuelas.map((e) => <option key={e.id} value={e.id}>{e.nombre}</option>)}
               </select>
             </Field>
-            <Field label="Tipo de paquete" className="col-md-6">
+            <Field label="Tipo de paquete" span="c-4">
               <select className="select" value={peForm.tipoPaqueteId} onChange={(e) => {
                 const t = e.target.value;
-                const base = PAQUETES[t];
-                setPeForm({ ...peForm, tipoPaqueteId: t, precio: base ? base.precioBase : peForm.precio, articulos: base ? base.incluye.map((n) => ({ nombre: n, cantidad: 1 })) : peForm.articulos });
+                setPeForm({ ...peForm, tipoPaqueteId: t, articulos: PAQUETES[t] ? PAQUETES[t].incluye.map((n) => ({ nombre: n, cantidad: 1 })) : peForm.articulos, precio: PAQUETES[t] ? PAQUETES[t].precioBase : peForm.precio });
               }}>
-                {Object.values(PAQUETES).map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
+                {Object.values(PAQUETES).map((p) => <option key={p.id} value={p.id}>{p.nombre} — ${p.precioBase}</option>)}
                 <option value="personalizado">Personalizado</option>
               </select>
             </Field>
-            <Field label="Precio negociado (USD)" className="col-md-6"><input type="number" className="input" value={peForm.precio} onChange={(e) => setPeForm({ ...peForm, precio: Number(e.target.value) || 0 })} /></Field>
-            <Field label="Nota / acuerdo" className="col-12"><input className="input" value={peForm.nota} onChange={(e) => setPeForm({ ...peForm, nota: e.target.value })} /></Field>
+            <Field label="Precio negociado (USD)" span="c-4"><input type="number" min="0" step="0.5" className="input" value={peForm.precio} onChange={(e) => setPeForm({ ...peForm, precio: Number(e.target.value) || 0 })} /></Field>
+            <Field label="Activo" span="c-4">
+              <div className="d-flex align-items-center gap-2 h-100"><Switch checked={peForm.activo} onChange={(v) => setPeForm({ ...peForm, activo: v })} /> <span style={{ fontSize: 12.5, color: "var(--ink-soft)" }}>{peForm.activo ? "Disponible para ventas" : "Pausado"}</span></div>
+            </Field>
+            <FormSec icon={<Boxes size={15} />}>Artículos incluidos</FormSec>
+            <div className="c-12 d-flex flex-column gap-1">
+              {peForm.articulos.map((a, i) => (
+                <div key={i} className="d-flex align-items-center gap-2">
+                  <input className="input" style={{ height: 34 }} value={a.nombre} onChange={(e) => setPeForm({ ...peForm, articulos: peForm.articulos.map((x, j) => (j === i ? { ...x, nombre: e.target.value } : x)) })} />
+                  <input type="number" min="1" className="input" style={{ height: 34, width: 80 }} value={a.cantidad} onChange={(e) => setPeForm({ ...peForm, articulos: peForm.articulos.map((x, j) => (j === i ? { ...x, cantidad: Number(e.target.value) || 1 } : x)) })} />
+                  <button className="icon-btn danger" style={{ width: 30, height: 30 }} onClick={() => setPeForm({ ...peForm, articulos: peForm.articulos.filter((_, j) => j !== i) })}><X size={13} /></button>
+                </div>
+              ))}
+              <button className="btn btn-ghost btn-xs w-100" onClick={() => setPeForm({ ...peForm, articulos: [...peForm.articulos, { nombre: "Nuevo artículo", cantidad: 1 }] })}><Plus size={12} /> Agregar artículo</button>
+            </div>
+            <Field label="Nota / acuerdo" span="c-12"><textarea className="textarea" value={peForm.nota} onChange={(e) => setPeForm({ ...peForm, nota: e.target.value })} /></Field>
           </div>
-          <div className="card p-3 mt-3" style={{ background: "var(--card-bg-2)" }}>
-            <SectionHead title="Artículos incluidos" />
-            {peForm.articulos.map((a, i) => (
-              <div key={i} className="d-flex align-items-center gap-2 py-1" style={{ fontSize: 13 }}>
-                <input type="number" min={1} className="input" style={{ width: 70, height: 34 }} value={a.cantidad} onChange={(e) => setPeForm({ ...peForm, articulos: peForm.articulos.map((x, j) => (j === i ? { ...x, cantidad: Number(e.target.value) || 1 } : x)) })} />
-                <span className="flex-grow-1">{a.nombre}</span>
-                <button className="icon-btn danger" style={{ width: 28, height: 28 }} onClick={() => setPeForm({ ...peForm, articulos: peForm.articulos.filter((_, j) => j !== i) })}><Trash2 size={13} /></button>
-              </div>
-            ))}
-          </div>
+          <FormFoot onCancel={() => setPeForm(null)} onSave={() => void guardarPe()} />
         </Modal>
       )}
-      <span className="d-none"><ShieldCheck size={1} /><Globe size={1} /><Euro size={1} /></span>
     </div>
   );
 }
 
-/* ============ INTEGRACIONES (Supabase + historial de tasas) ============ */
+/* ============================================================
+   INTEGRACIONES — Supabase + historial de tasas
+   ============================================================ */
 export function Integraciones() {
-  const { db, tasa, refreshTasa, tasaLoading, testCloud, syncToCloud, restoreFromCloud, syncInfo, syncing, setConfig, confirm, success, toast, deleteTasaHistorial, clearTasaHistorial } = useApp();
-  const nowInt = useNow(1000);
-  const [url, setUrl] = useState(db.config.supabaseUrl);
-  const [key, setKey] = useState(db.config.supabaseKey);
+  const { db, setConfig, confirm, success, toast, testCloud, syncToCloud, restoreFromCloud, syncInfo, syncing, deleteTasaHistorial, clearTasaHistorial } = useApp();
+  const [sbUrl, setSbUrl] = useState(db.config.supabaseUrl);
+  const [sbKey, setSbKey] = useState(db.config.supabaseKey);
   const [verKey, setVerKey] = useState(false);
-  const [pingState, setPingState] = useState<"idle" | "busy" | "ok" | "fail">("idle");
-  const [pingInfo, setPingInfo] = useState<{ tablas: number; filas: number } | null>(null);
+  const [test, setTest] = useState<"idle" | "busy" | "ok" | "fail">("idle");
+  const [testInfo, setTestInfo] = useState<{ tablas: number; filas: number } | null>(null);
   const [verSql, setVerSql] = useState(false);
-  const [tablaEstado, setTablaEstado] = useState<Record<string, "busy" | "ok" | "err">>({});
+  const [tabEstado, setTabEstado] = useState<Record<string, "busy" | "ok" | "err">>({});
+  const [autoSync, setAutoSync] = useState(db.config.autoSyncCloud);
+  const now = useNow(1000);
+  const histRef = useRef<HTMLInputElement>(null);
 
-  const guardarCreds = async () => {
-    const ok = await confirm({ title: "¿Desea guardar este registro?", message: "Se guardarán la URL y la anon key de Supabase.", confirmText: "Sí, Guardar" });
+  const guardarSb = async () => {
+    const ok = await confirm({ title: "¿Desea guardar este registro?", message: "Las credenciales de Supabase se guardarán en este navegador.", confirmText: "Sí, Guardar" });
     if (!ok) return;
-    setConfig({ supabaseUrl: url.trim(), supabaseKey: key.trim() });
-    success();
+    setConfig({ supabaseUrl: sbUrl.trim(), supabaseKey: sbKey.trim(), autoSyncCloud: autoSync });
+    success("Credenciales de Supabase guardadas");
   };
   const probar = async () => {
-    if (!url.trim() || !key.trim()) { toast("Pega la URL del proyecto y la anon key", "warn"); return; }
-    setPingState("busy");
+    setTest("busy");
     try {
-      const info = await testCloud(url.trim(), key.trim());
-      setPingInfo(info); setPingState("ok");
-      toast(`Conectado: ${info.tablas} tablas · ${info.filas} filas en Supabase`, "ok");
-    } catch (e: any) {
-      setPingState("fail");
-      toast(e.message || "No se pudo conectar", "err");
-    }
+      const info = await testCloud(sbUrl.trim(), sbKey.trim());
+      setTestInfo(info);
+      setTest("ok");
+      toast(`Conectado ✓ · ${info.tablas} tablas · ${info.filas} filas`, "ok");
+    } catch (e: any) { setTest("fail"); toast(e?.message || "No se pudo conectar", "err"); }
   };
   const subir = async () => {
-    const ok = await confirm({ title: "¿Subir la base de datos a Supabase?", message: "Se reemplazará el contenido de las 14 tablas con los datos del CRM.", confirmText: "Sí, Subir" });
+    const ok = await confirm({ title: "¿Subir la base completa a Supabase?", message: "Las 14 tablas del CRM reemplazarán los datos actuales en la nube.", confirmText: "Sí, Subir" });
     if (!ok) return;
-    setTablaEstado({});
-    const r = await syncToCloud((t, s) => setTablaEstado((v) => ({ ...v, [t]: s })));
-    if (r) success("Base de datos subida a Supabase");
+    await syncToCloud((t, s) => setTabEstado((v) => ({ ...v, [t]: s })));
   };
-  const bajar = async () => {
-    const ok = await confirm({ title: "¿Restaurar desde Supabase?", message: "Los datos del CRM se reemplazarán por los de la nube.", confirmText: "Sí, Restaurar", danger: true });
+  const restaurar = async () => {
+    const ok = await confirm({ title: "¿Restaurar desde Supabase?", message: "Los datos locales se reemplazarán por los de la nube.", confirmText: "Sí, Restaurar", danger: true });
     if (!ok) return;
-    const r = await restoreFromCloud();
-    if (r) success("Base de datos restaurada desde Supabase");
+    await restoreFromCloud();
   };
-  const exportarHist = () => {
-    downloadFile(`historial-tasas-${todayISO()}.csv`, toCSV(["Fecha", "USD", "Euro", "Paralelo", "Fuente"], db.historialTasas.map((h) => [h.fecha, h.usd.toFixed(4), h.euro.toFixed(4), h.paralelo.toFixed(4), h.fuente])));
-    toast("Historial exportado", "ok");
-  };
-  const borrarHist = async () => {
-    const ok = await confirm({ title: "¿Está seguro de eliminar este registro?", message: "Se vaciará todo el historial de tasas.", confirmText: "Eliminar", danger: true });
-    if (!ok) return;
-    clearTasaHistorial();
-    toast("Historial vaciado", "warn");
-  };
+
+  const paso1 = sbUrl.trim().length > 0 && sbKey.trim().length > 0;
+  const paso2 = test === "ok";
+  const hist = [...db.historialTasas].sort((a, b) => a.fecha.localeCompare(b.fecha));
+  const ultimos = hist.slice(-14);
+  const maxUsd = Math.max(...ultimos.map((h) => h.usd), 1);
+  const minUsd = Math.min(...ultimos.map((h) => h.usd));
+  const W = 560, H = 120, P = 10;
+  const pts = ultimos.map((h, i) => `${P + (i * (W - P * 2)) / Math.max(1, ultimos.length - 1)},${P + (H - P * 2) * (1 - (h.usd - minUsd) / Math.max(0.01, maxUsd - minUsd))}`).join(" ");
 
   return (
     <div className="page">
@@ -531,186 +851,171 @@ export function Integraciones() {
         <div>
           <div className="crumb">Sistema</div>
           <h1>Integraciones</h1>
-          <p style={{ fontSize: 13.5, margin: "4px 0 0", color: "var(--ink-soft)" }}>Base de datos en Supabase y tasa del día con historial diario</p>
+          <p style={{ fontSize: 13.5, margin: "4px 0 0", color: "var(--ink-soft)" }}>Base de datos en Supabase, historial de la tasa del día y APIs conectadas</p>
         </div>
-        <button className="btn btn-ghost" onClick={() => void refreshTasa()} disabled={tasaLoading}><RefreshCw size={15} className={tasaLoading ? "spin" : ""} /> Actualizar tasa</button>
+        {syncInfo && (
+          <Badge tone={syncInfo.ok ? "green" : "red"} dot>
+            {syncInfo.msg} · {fmtHaceSegundos(syncInfo.last, now)}
+          </Badge>
+        )}
       </div>
 
-      {/* ============ BASE DE DATOS EN SUPABASE (organizada en pasos) ============ */}
+      {/* Barra de progreso de pasos */}
+      <div className="card p-3 mb-3 d-flex align-items-center gap-2 flex-wrap">
+        {[
+          { n: 1, t: "Conectar", done: paso1 },
+          { n: 2, t: "Crear esquema SQL", done: paso2 },
+          { n: 3, t: "Sincronizar datos", done: syncInfo?.ok || false },
+        ].map((p, i) => (
+          <React.Fragment key={p.n}>
+            {i > 0 && <span className="flex-grow-1" style={{ minWidth: 30, height: 2, background: p.done ? "var(--ok)" : "var(--line)", borderRadius: 2 }} />}
+            <span className="d-flex align-items-center gap-2">
+              <span className="d-flex align-items-center justify-content-center rounded-circle font-display fw-bold" style={{ width: 28, height: 28, fontSize: 12, background: p.done ? "var(--ok)" : "var(--card-bg-2)", color: p.done ? "#fff" : "var(--ink-faint)", transition: "background .3s" }}>{p.done ? <Check size={14} /> : p.n}</span>
+              <span className="font-display fw-semibold" style={{ fontSize: 12.5, color: p.done ? "var(--ok)" : "var(--ink-soft)" }}>{p.t}</span>
+            </span>
+          </React.Fragment>
+        ))}
+      </div>
 
-      {/* Encabezado con estado de conexión */}
-      <div className="card overflow-hidden mb-4">
-        <div className="p-4 d-flex align-items-center gap-3 flex-wrap" style={{ background: "linear-gradient(135deg, var(--jyg-navy), #0a2a4d)", color: "#fff" }}>
-          <span className="d-flex align-items-center justify-content-center rounded-3 flex-shrink-0" style={{ width: 46, height: 46, background: "rgba(255,217,112,0.18)", color: "#ffd970" }}><Cloud size={23} /></span>
-          <div className="flex-grow-1" style={{ minWidth: 200 }}>
-            <h3 className="font-display fw-bold m-0" style={{ fontSize: 17, color: "#fff" }}>Base de datos en Supabase</h3>
-            <p style={{ fontSize: 12, margin: "2px 0 0", color: "rgba(255,255,255,0.72)" }}>Una tabla por módulo · PostgreSQL en la nube · respaldo en línea del CRM</p>
-          </div>
-          <span className={`sb-status ${db.config.supabaseUrl ? (pingState === "ok" ? "ok" : "warn") : "off"}`}>
-            <span className={`rounded-circle ${db.config.supabaseUrl ? "pulse-dot" : ""}`} style={{ width: 8, height: 8, background: db.config.supabaseUrl ? "var(--ok)" : "var(--ink-faint)" }} />
-            {db.config.supabaseUrl ? (pingState === "ok" ? "Conectada" : "Configurada") : "Sin configurar"}
-          </span>
-        </div>
-
-        {/* Resumen rápido: 3 hitos */}
-        <div className="row g-3 p-4" style={{ background: "var(--card-bg-2)" }}>
-          {[
-            { n: "1", t: "Conectar", d: "URL + anon key", done: !!db.config.supabaseUrl, ic: <Plug size={15} /> },
-            { n: "2", t: "Crear esquema", d: `${DB_TABLES.length} tablas SQL`, done: pingState === "ok", ic: <Database size={15} /> },
-            { n: "3", t: "Sincronizar", d: "Subir / restaurar", done: !!syncInfo?.ok, ic: <UploadCloud size={15} /> },
-          ].map((s) => (
-            <div key={s.n} className="col-12 col-md-4">
-              <div className="d-flex align-items-center gap-3 p-3 rounded-3" style={{ background: "var(--card-bg)", border: "1px solid var(--line-soft)" }}>
-                <span className={`sb-step-num ${s.done ? "done" : ""}`}>{s.done ? <Check size={15} /> : s.ic}</span>
-                <div style={{ minWidth: 0 }}>
-                  <div className="sb-step-title" style={{ fontSize: 13.5 }}>Paso {s.n} · {s.t}</div>
-                  <div className="sb-step-desc">{s.d}</div>
+      <div className="row g-3">
+        {/* Paso 1: conexión */}
+        <div className="col-12 col-xl-6">
+          <div className="card p-3 p-md-4 h-100" style={{ borderLeft: "4px solid var(--jyg-navy)" }}>
+            <SectionHead title="1 · Conectar el proyecto Supabase" desc="URL del proyecto y anon key — Settings → API en Supabase" actions={
+              <Badge tone={paso1 ? "green" : "slate"} dot>{paso1 ? "Credenciales listas" : "Sin configurar"}</Badge>
+            } />
+            <Field label="URL del proyecto">
+              <input className="input" style={{ fontFamily: "ui-monospace, monospace", fontSize: 12 }} placeholder="https://xxxx.supabase.co" value={sbUrl} onChange={(e) => setSbUrl(e.target.value)} />
+            </Field>
+            <div className="mt-3">
+              <Field label="Anon key (pública)">
+                <div className="d-flex gap-1">
+                  <input type={verKey ? "text" : "password"} className="input" style={{ fontFamily: "ui-monospace, monospace", fontSize: 12 }} placeholder="eyJhbGciOi…" value={sbKey} onChange={(e) => setSbKey(e.target.value)} />
+                  <button className="icon-btn" title={verKey ? "Ocultar" : "Mostrar"} onClick={() => setVerKey(!verKey)}>{verKey ? <EyeOff size={15} /> : <Eye size={15} />}</button>
                 </div>
-              </div>
+              </Field>
             </div>
-          ))}
-        </div>
-      </div>
-
-      <div className="row g-4">
-        {/* PASO 1 · Conexión */}
-        <div className="col-12 col-lg-5">
-          <div className="card sb-step p-4 h-100">
-            <div className="d-flex align-items-center gap-3 mb-3">
-              <span className={`sb-step-num ${db.config.supabaseUrl ? "done" : ""}`}>{db.config.supabaseUrl ? <Check size={15} /> : "1"}</span>
-              <div>
-                <div className="sb-step-title">Conectar el proyecto</div>
-                <div className="sb-step-desc">Pega la URL y la anon key de Supabase.</div>
-              </div>
-            </div>
-            <Field label="URL del proyecto" hint="https://xxxx.supabase.co">
-              <input className="input" style={{ fontFamily: "ui-monospace, monospace", fontSize: 12 }} placeholder="https://xxxx.supabase.co" value={url} onChange={(e) => setUrl(e.target.value)} />
-            </Field>
-            <Field label="Anon key" className="mt-3">
-              <div className="d-flex gap-1">
-                <input type={verKey ? "text" : "password"} className="input" style={{ fontFamily: "ui-monospace, monospace", fontSize: 12 }} value={key} onChange={(e) => setKey(e.target.value)} />
-                <button className="icon-btn" onClick={() => setVerKey(!verKey)} title={verKey ? "Ocultar" : "Mostrar"}>{verKey ? <EyeOff size={15} /> : <Eye size={15} />}</button>
-              </div>
-            </Field>
-            <div className="d-flex gap-2 flex-wrap mt-3">
-              <button className="btn btn-primary btn-sm" onClick={guardarCreds}><Check size={14} /> Guardar credenciales</button>
-              <button className="btn btn-ghost btn-sm" onClick={probar} disabled={pingState === "busy"}>
-                <Plug size={14} className={pingState === "busy" ? "spin" : ""} />
-                {pingState === "busy" ? "Probando…" : pingState === "ok" ? "Conectada ✓" : pingState === "fail" ? "Reintentar" : "Probar conexión"}
+            <div className="d-flex gap-2 flex-wrap mt-3 align-items-center">
+              <button className="btn btn-primary btn-sm" onClick={() => void guardarSb()}><Save size={14} /> Guardar credenciales</button>
+              <button className="btn btn-ghost btn-sm" onClick={() => void probar()} disabled={test === "busy"}>
+                <Plug size={14} className={test === "busy" ? "spin" : ""} />
+                {test === "busy" ? "Probando…" : test === "ok" ? `Conectado ✓ (${testInfo?.tablas} tablas)` : test === "fail" ? "Reintentar" : "Probar conexión"}
               </button>
             </div>
-            {pingInfo && pingState === "ok" && <p className="mt-2 mb-0" style={{ fontSize: 12, color: "var(--ok)" }}>{pingInfo.tablas} tablas accesibles · {pingInfo.filas} filas en la nube</p>}
-            <p className="mt-3 mb-0 p-3 rounded-3" style={{ fontSize: 12, color: "var(--ink-soft)", background: "var(--card-bg-2)" }}>
-              Encuentra estos datos en Supabase → <b>Settings → API</b> (Project URL y anon public key). La clave es un secreto: nunca la subas al código.
+            <label className="d-flex align-items-center gap-2 mt-3" style={{ fontSize: 12.5, color: "var(--ink-soft)", cursor: "pointer" }}>
+              <Switch checked={autoSync} onChange={(v) => { setAutoSync(v); setConfig({ autoSyncCloud: v }); toast(v ? "Auto-sincronización activada (cada cambio)" : "Auto-sincronización apagada", "ok"); }} />
+              Sincronizar automáticamente tras cada cambio (2.5 s)
+            </label>
+            <p className="mt-2 mb-0" style={{ fontSize: 11.5, color: "var(--ink-faint)" }}>
+              <ShieldCheck size={12} style={{ verticalAlign: -2, color: "var(--ok)" }} /> La anon key es pública por diseño; la seguridad la da RLS en Supabase.
             </p>
           </div>
         </div>
 
-        {/* PASO 2 · Esquema SQL */}
-        <div className="col-12 col-lg-7">
-          <div className="card sb-step p-4 h-100">
-            <div className="d-flex align-items-center gap-3 mb-3">
-              <span className={`sb-step-num ${pingState === "ok" ? "done" : ""}`}>{pingState === "ok" ? <Check size={15} /> : "2"}</span>
-              <div className="flex-grow-1">
-                <div className="sb-step-title">Crear el esquema SQL</div>
-                <div className="sb-step-desc">Ejecuta este SQL en Supabase → SQL Editor para crear las {DB_TABLES.length} tablas.</div>
+        {/* Paso 2: esquema */}
+        <div className="col-12 col-xl-6">
+          <div className="card p-3 p-md-4 h-100" style={{ borderLeft: "4px solid var(--jyg-gold)" }}>
+            <SectionHead title="2 · Crear el esquema SQL" desc="Una tabla por módulo (14 en total) — SQL Editor en Supabase" actions={
+              <button className="btn btn-soft btn-xs" onClick={() => setVerSql(!verSql)}>{verSql ? "Ocultar SQL" : "Ver SQL"}</button>
+            } />
+            {verSql ? (
+              <div className="position-relative">
+                <pre className="p-3 rounded-3 overflow-auto" style={{ background: "#0d1524", color: "#a8c6e8", fontSize: 10.5, maxHeight: 220, fontFamily: "ui-monospace, Menlo, monospace" }}>{SUPABASE_SQL}</pre>
+                <button className="btn btn-gold btn-xs position-absolute" style={{ top: 10, right: 10 }} onClick={() => { navigator.clipboard?.writeText(SUPABASE_SQL).then(() => toast("Esquema SQL copiado", "ok")).catch(() => undefined); }}><Copy size={11} /> Copiar</button>
               </div>
-              <button className="btn btn-gold btn-sm" onClick={() => setVerSql(!verSql)}><Database size={13} /> {verSql ? "Ocultar" : "Ver SQL"}</button>
-            </div>
-
-            {verSql && (
-              <div className="position-relative rounded-3 overflow-hidden mb-3" style={{ background: "#0b1626", border: "1px solid #1d3350" }}>
-                <div className="d-flex align-items-center justify-content-between px-3 py-2" style={{ background: "#0e1d33" }}>
-                  <span className="d-flex align-items-center gap-2 font-display fw-semibold" style={{ fontSize: 11, color: "#7fa3cf" }}><Database size={13} /> esquema.sql · una tabla por módulo</span>
-                  <button className="btn btn-xs" style={{ background: "rgba(255,217,112,0.15)", color: "#ffd970", border: "1px solid rgba(255,217,112,0.4)" }} onClick={() => { navigator.clipboard?.writeText(SUPABASE_SQL).then(() => toast("SQL copiado", "ok")).catch(() => undefined); }}><Copy size={12} /> Copiar</button>
-                </div>
-                <pre className="m-0 p-3 overflow-auto" style={{ color: "#a8c6e8", fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace", fontSize: 11, maxHeight: 220 }}>{SUPABASE_SQL}</pre>
-              </div>
-            )}
-
-            <div className="font-display fw-semibold text-uppercase mb-2" style={{ fontSize: 11, letterSpacing: 1, color: "var(--ink-faint)" }}>Mapa de tablas</div>
-            <div className="row g-2">
-              {DB_TABLES.map((t) => {
-                const st = tablaEstado[t.tabla];
-                const bg = st === "ok" ? "var(--tint-ok)" : st === "err" ? "var(--tint-danger)" : st === "busy" ? "var(--tint-warn)" : "var(--card-bg-2)";
-                return (
-                  <div key={t.tabla} className="col-6 col-sm-4">
-                    <div className="d-flex align-items-center gap-2 p-2 rounded-3" style={{ background: bg, fontSize: 11.5, transition: "background .3s" }}>
-                      <Database size={12} style={{ color: "var(--jyg-navy)", flexShrink: 0 }} />
-                      <span className="flex-grow-1 text-truncate fw-semibold">{t.label}</span>
-                      {st === "busy" && <RefreshCw size={11} className="spin" />}
-                      {st === "ok" && <Check size={12} style={{ color: "var(--ok)" }} />}
-                      {st === "err" && <AlertTriangle size={12} style={{ color: "var(--danger)" }} />}
+            ) : (
+              <div className="row g-2">
+                {DB_TABLES.map((t) => (
+                  <div key={t.tabla} className="col-6 col-md-4">
+                    <div className="sb-table-item">
+                      <span className="tname flex-grow-1 text-truncate">{t.tabla}</span>
+                      {tabEstado[t.tabla] === "busy" && <span className="spin" style={{ color: "var(--warn)" }}><i className="bi bi-arrow-repeat" /></span>}
+                      {tabEstado[t.tabla] === "ok" && <Check size={13} style={{ color: "var(--ok)" }} />}
+                      {tabEstado[t.tabla] === "err" && <X size={13} style={{ color: "var(--danger)" }} />}
+                      {!tabEstado[t.tabla] && <span className="dot" style={{ background: "var(--line)", boxShadow: "none" }} />}
                     </div>
                   </div>
-                );
-              })}
-            </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
-      </div>
 
-      {/* PASO 3 · Sincronización */}
-      <div className="card sb-step p-4 mt-4">
-        <div className="row g-4 align-items-start">
-          <div className="col-12 col-lg-5">
-            <div className="d-flex align-items-center gap-3 mb-3">
-              <span className={`sb-step-num ${syncInfo?.ok ? "done" : ""}`}>{syncInfo?.ok ? <Check size={15} /> : "3"}</span>
-              <div>
-                <div className="sb-step-title">Sincronizar datos</div>
-                <div className="sb-step-desc">Sube el CRM a la nube o restáuralo desde ella.</div>
+        {/* Paso 3: sincronización */}
+        <div className="col-12">
+          <div className="card p-3 p-md-4" style={{ borderLeft: "4px solid var(--ok)" }}>
+            <SectionHead title="3 · Sincronizar datos" desc="Sube la base completa o restáurala desde la nube" actions={syncing && <Badge tone="amber" dot>Sincronizando…</Badge>} />
+            <div className="row g-3">
+              <div className="col-12 col-md-7">
+                <div className="d-flex gap-2 flex-wrap">
+                  <button className="btn btn-primary" onClick={() => void subir()} disabled={syncing || !paso1}><Upload size={15} /> Subir base completa</button>
+                  <button className="btn btn-ghost" onClick={() => void restaurar()} disabled={syncing || !paso1}><Download size={15} /> Restaurar desde la nube</button>
+                </div>
+                <div className="mt-3 p-3 rounded-3" style={{ background: "var(--card-bg-2)", fontSize: 12.5 }}>
+                  {syncInfo ? (
+                    <>
+                      <b style={{ color: syncInfo.ok ? "var(--ok)" : "var(--danger)" }}>{syncInfo.msg}</b>
+                      <div style={{ color: "var(--ink-faint)", fontSize: 11.5 }}>{fmtFechaHoraViva(syncInfo.last, now)} · {fmtHaceSegundos(syncInfo.last, now)}</div>
+                    </>
+                  ) : "Aún no hay movimientos. Los datos viven en este navegador hasta que sincronices."}
+                </div>
+              </div>
+              <div className="col-12 col-md-5">
+                <div className="p-3 rounded-3 h-100" style={{ background: "var(--tint-navy-2)", fontSize: 12.5, color: "var(--ink-soft)" }}>
+                  <b className="font-display" style={{ color: "var(--jyg-navy)" }}>¿Y cuando JyG crezca?</b>
+                  <p className="m-0 mt-1">Supabase (PostgreSQL) soporta multi-sucursal, reportes SQL y app propia. El CRM exporta/importa JSON, así que migrar es directo.</p>
+                </div>
               </div>
             </div>
-            <div className="d-flex gap-2 flex-wrap">
-              <button className="btn btn-primary btn-sm" onClick={subir} disabled={syncing || !db.config.supabaseUrl}><UploadCloud size={14} /> {syncing ? "Subiendo…" : "Subir base completa"}</button>
-              <button className="btn btn-ghost btn-sm" onClick={bajar} disabled={syncing || !db.config.supabaseUrl}><Download size={14} /> Restaurar desde la nube</button>
-            </div>
-            <div className="mt-3 p-3 rounded-3 d-flex align-items-start gap-2" style={{ fontSize: 12, background: syncInfo ? (syncInfo.ok ? "var(--tint-ok)" : "var(--tint-danger)") : "var(--card-bg-2)", color: syncInfo ? (syncInfo.ok ? "var(--ok)" : "var(--danger)") : "var(--ink-faint)" }}>
-              <Cloud size={14} className="mt-1 flex-shrink-0" />
-              <span>
-                {syncInfo ? <><b>{syncInfo.msg}</b><br /><span className="tabular-nums" style={{ opacity: 0.75 }}>{fmtFechaHoraViva(syncInfo.last, nowInt)} · {fmtHaceSegundos(syncInfo.last, nowInt)}</span></> : "Aún no hay sincronizaciones. El CRM guarda todo en este navegador; la nube es tu respaldo en línea."}
-              </span>
-            </div>
-          </div>
-          <div className="col-12 col-lg-7">
-            <div className="p-3 rounded-3 h-100" style={{ background: "var(--card-bg-2)", fontSize: 12.5, color: "var(--ink-soft)" }}>
-              <b className="font-display" style={{ color: "var(--ink)" }}>¿Y cuando JyG crezca?</b>
-              <p className="mt-1 mb-0">Supabase soporta multi-sucursal, reportes SQL y una app propia. Como el CRM exporta/importa JSON, migrar de un dispositivo a otro —o a un plan superior— es directo.</p>
-            </div>
           </div>
         </div>
-      </div>
 
-      {/* Historial de tasas */}
-      <div className="card p-4">
-        <SectionHead title="Historial diario de tasas" desc="Registro automático de la tasa del día" actions={
-          <div className="d-flex gap-2">
-            <button className="btn btn-ghost btn-sm" onClick={exportarHist}><Download size={14} /> CSV</button>
-            <button className="btn btn-danger btn-sm" onClick={borrarHist}><Trash2 size={14} /> Vaciar</button>
+        {/* Historial de tasas */}
+        <div className="col-12">
+          <div className="card p-3 p-md-4">
+            <SectionHead title="Historial de la tasa del día" desc="Cierre diario registrado automáticamente desde ve.dolarapi.com" actions={
+              <div className="d-flex gap-2">
+                <button className="btn btn-ghost btn-xs" onClick={() => { downloadFile(`historial-tasas-${todayISO()}.csv`, toCSV(["Fecha", "USD Bs", "EUR Bs", "Paralelo Bs", "Fuente"], hist.map((h) => [h.fecha, h.usd, h.euro, h.paralelo, h.fuente]))); toast("Historial exportado", "ok"); }}><Download size={12} /> Exportar CSV</button>
+                <button className="btn btn-ghost btn-xs" onClick={async () => { const ok = await confirm({ title: "¿Limpiar el historial?", message: "Se eliminarán todos los registros de tasas guardados.", confirmText: "Sí, limpiar", danger: true }); if (ok) { clearTasaHistorial(); toast("Historial limpio", "warn"); } }}><Trash2 size={12} /> Limpiar</button>
+              </div>
+            } />
+            {ultimos.length > 1 && (
+              <div className="rounded-3 p-3 mb-3" style={{ background: "var(--card-bg-2)" }}>
+                <div className="d-flex align-items-center gap-2 mb-2">
+                  <Sparkles size={14} style={{ color: "var(--jyg-gold-deep)" }} />
+                  <span className="font-display fw-bold" style={{ fontSize: 12.5 }}>Últimos {ultimos.length} cierres (USD)</span>
+                  <span className="ms-auto tabular-nums" style={{ fontSize: 12, color: "var(--ink-faint)" }}>mín {fmtBs(minUsd)} · máx {fmtBs(maxUsd)}</span>
+                </div>
+                <svg viewBox={`0 0 ${W} ${H}`} className="w-100" style={{ maxHeight: 140 }}>
+                  <polyline points={pts} fill="none" stroke="var(--jyg-navy-500)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+                  <circle cx={pts.split(" ").pop()?.split(",")[0]} cy={pts.split(" ").pop()?.split(",")[1]} r="4" fill="var(--jyg-gold-deep)" />
+                </svg>
+              </div>
+            )}
+            <div className="table-responsive">
+              <table className="tbl">
+                <thead><tr><th>Fecha</th><th>USD (Bs)</th><th>EUR (Bs)</th><th>Paralelo (Bs)</th><th>Fuente</th><th className="text-end">Acción</th></tr></thead>
+                <tbody>
+                  {[...hist].reverse().map((h) => (
+                    <tr key={h.id}>
+                      <td className="font-display fw-semibold" style={{ fontSize: 12.5 }}>{fmtFecha(h.fecha)}</td>
+                      <td className="tabular-nums fw-bold" style={{ color: "var(--jyg-navy)", fontSize: 13 }}>{fmtBs(h.usd)}</td>
+                      <td className="tabular-nums" style={{ color: "var(--jyg-gold-deep)", fontSize: 13 }}>{fmtBs(h.euro)}</td>
+                      <td className="tabular-nums" style={{ fontSize: 12.5, color: "var(--ink-soft)" }}>{fmtBs(h.paralelo)}</td>
+                      <td><Badge tone={h.fuente === "dolarapi" ? "blue" : "amber"} dot>{h.fuente === "dolarapi" ? "DolarAPI" : "Manual"}</Badge></td>
+                      <td className="text-end">
+                        <button className="icon-btn danger" style={{ width: 26, height: 26 }} title="Eliminar" onClick={async () => { const ok = await confirm({ title: "¿Está seguro de eliminar este registro?", message: `Se quitará la tasa del ${fmtFecha(h.fecha)}.`, confirmText: "Eliminar", danger: true }); if (ok) { deleteTasaHistorial(h.id); toast("Registro eliminado", "warn"); } }}><Trash2 size={11} /></button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {hist.length === 0 && <EmptyState icon={History} title="Sin historial" text="La tasa se registra automáticamente cada día desde la API." />}
           </div>
-        } />
-        <div className="table-responsive" style={{ maxHeight: 320, overflowY: "auto" }}>
-          <table className="tbl">
-            <thead><tr><th>Fecha</th><th>USD (Bs)</th><th>Euro (Bs)</th><th>Paralelo</th><th>Fuente</th><th></th></tr></thead>
-            <tbody>
-              {[...db.historialTasas].reverse().map((h) => (
-                <tr key={h.id}>
-                  <td className="font-display fw-semibold" style={{ fontSize: 12.5 }}><History size={12} className="me-1" style={{ color: "var(--ink-faint)" }} />{fmtFecha(h.fecha)}</td>
-                  <td className="tabular-nums fw-bold" style={{ color: "var(--jyg-navy)" }}>{fmtBs(h.usd)}</td>
-                  <td className="tabular-nums" style={{ fontSize: 12.5 }}>{fmtBs(h.euro)}</td>
-                  <td className="tabular-nums" style={{ fontSize: 12.5, color: "var(--ink-faint)" }}>{h.paralelo ? fmtBs(h.paralelo) : "—"}</td>
-                  <td><Badge tone={h.fuente === "dolarapi" ? "blue" : "amber"}>{h.fuente}</Badge></td>
-                  <td><button className="icon-btn danger" style={{ width: 30, height: 30 }} title="Eliminar" onClick={() => deleteTasaHistorial(h.id)}><Trash2 size={13} /></button></td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
         </div>
-        <p className="mt-2 mb-0 d-flex align-items-center gap-1" style={{ fontSize: 12, color: "var(--ink-faint)" }}>
-          <Clock size={12} /> Tasa actual: <b className="tabular-nums">{fmtBs(tasa.usd)}</b> · Euro <b className="tabular-nums">{fmtBs(tasa.eur)}</b> · {fmtHaceSegundos(tasa.updated, nowInt)}
-        </p>
       </div>
-      <span className="d-none"><KeyRound size={1} /><Globe size={1} /></span>
+      <span className="d-none"><Wallet size={1} /><UserCog size={1} /><SearchInput value="" onChange={() => undefined} placeholder="" /><FilterSelect value="" onChange={() => undefined} allLabel="" options={[]} /><Toolbar count={0} countLabel=""><span /></Toolbar></span>
     </div>
   );
 }

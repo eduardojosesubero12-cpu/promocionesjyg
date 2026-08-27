@@ -1,306 +1,260 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
-  BarChart3, Bell, Boxes, CalendarDays, Camera, ChevronDown, ChevronRight, Contact,
-  GraduationCap, LayoutDashboard, LogOut, Menu, MessageSquare, Moon, Package, Plug, QrCode,
-  Receipt, ScanLine, School, Search, Settings, Sun, Ticket, UserCog, Users, Wallet, X,
+  BarChart3, Bell, CalendarDays, Camera, ChevronDown, ChevronRight, FileText, GraduationCap,
+  LayoutDashboard, Menu, MessageSquare, Moon, Package, Plug, QrCode, Receipt, ScanLine, School,
+  Search, Settings, ShoppingBag, Sun, UserCog, Users, Wallet, X, type LucideIcon,
 } from "lucide-react";
-import { useApp, ROUTE_TITLE, SECTION_OF, type Route } from "../lib/store";
-import { fmtUSD, estudianteTotales } from "../lib/data";
+import { useApp } from "../lib/store";
+import type { Route } from "../lib/store";
+import { MODULOS_GRUPOS, ROL_LABEL, fmtBs, fmtHaceSegundos, estudianteTotales } from "../lib/data";
+import { useNow } from "./ui";
 
-const MENU: { section: string; items: { id: Route; label: string; icon: any }[] }[] = [
-  { section: "", items: [{ id: "dashboard", label: "Dashboard", icon: LayoutDashboard }] },
-  {
-    section: "CRM",
-    items: [
-      { id: "clientes", label: "Clientes", icon: Contact },
-      { id: "escuelas", label: "Escuelas", icon: School },
-      { id: "docentes", label: "Profesores", icon: Users },
-      { id: "estudiantes", label: "Estudiantes", icon: GraduationCap },
-      { id: "ventas", label: "Ventas", icon: Wallet },
-      { id: "paquetes", label: "Paquetes", icon: Package },
-      { id: "cotizaciones", label: "Cotizaciones", icon: Receipt },
-      { id: "mensajes", label: "Mensajes", icon: MessageSquare },
-    ],
-  },
-  {
-    section: "Operaciones",
-    items: [
-      { id: "sesiones", label: "Sesiones Fotográficas", icon: Camera },
-      { id: "agenda", label: "Agenda / Calendario", icon: CalendarDays },
-      { id: "produccion", label: "Producción", icon: Boxes },
-      { id: "qr", label: "Tarjetas QR", icon: QrCode },
-      { id: "ocr", label: "Escáner OCR", icon: ScanLine },
-      { id: "facturas", label: "Facturación", icon: Ticket },
-    ],
-  },
-  {
-    section: "Administración",
-    items: [
-      { id: "reportes", label: "Reportes", icon: BarChart3 },
-      { id: "usuarios", label: "Usuarios", icon: UserCog },
-    ],
-  },
-  {
-    section: "Sistema",
-    items: [
-      { id: "config", label: "Configuración", icon: Settings },
-      { id: "integraciones", label: "Integraciones", icon: Plug },
-    ],
-  },
-];
+/* Un icono propio para cada módulo (nítidos y consistentes en expandido y colapsado) */
+const ICONOS_MODULO: Record<string, LucideIcon> = {
+  dashboard: LayoutDashboard, clientes: Users, escuelas: School, docentes: GraduationCap,
+  estudiantes: UserCog, ventas: ShoppingBag, paquetes: Package, cotizaciones: FileText,
+  mensajes: MessageSquare, sesiones: Camera, agenda: CalendarDays, produccion: BarChart3,
+  qr: QrCode, facturas: Receipt, ocr: ScanLine, reportes: BarChart3, usuarios: Users,
+  config: Settings, integraciones: Plug,
+};
 
-function MenuList({ onGo, mini }: { onGo: (r: Route) => void; mini?: boolean }) {
-  const { route, can, setCurrentUser, db, user } = useApp();
-  return (
-    <nav className="jyg-nav py-2">
-      {MENU.map((g) => {
-        const visibles = g.items.filter((i) => can(i.id));
-        if (!visibles.length) return null;
-        return (
-          <div key={g.section || "top"}>
-            {g.section && <div className="nav-section">{g.section}</div>}
-            {visibles.map((i) => (
-              <a
-                key={i.id}
-                href="#"
-                title={i.label}
-                className={`nav-link ${route === i.id ? "active" : ""}`}
-                onClick={(e) => { e.preventDefault(); onGo(i.id); }}
-              >
-                <i.icon size={17} />
-                <span>{i.label}</span>
-              </a>
-            ))}
-          </div>
-        );
-      })}
-      <div className="nav-section">Cuenta</div>
-      <a
-        href="#"
-        title="Cambiar usuario"
-        className="nav-link logout"
-        onClick={(e) => {
-          e.preventDefault();
-          const otros = db.usuarios.filter((u) => u.id !== user.id && u.activo);
-          if (otros.length) { setCurrentUser(otros[0].id); }
-        }}
-      >
-        <LogOut size={17} />
-        <span>Cambiar usuario</span>
-      </a>
-    </nav>
-  );
-}
-
-function BrandMark() {
-  return (
-    <div className="jyg-brand">
-      <span className="mark"><GraduationCap size={22} /></span>
-      <span>
-        <b>Promociones JyG</b>
-        <small>CRM de Grados</small>
-      </span>
-    </div>
-  );
-}
+export const ROUTE_TITLE: Record<Route, string> = {
+  dashboard: "Dashboard", clientes: "Clientes", escuelas: "Escuelas", docentes: "Profesores",
+  estudiantes: "Estudiantes", ventas: "Ventas · Pedidos", paquetes: "Paquetes", cotizaciones: "Cotizaciones",
+  mensajes: "Mensajes", sesiones: "Sesiones Fotográficas", agenda: "Agenda / Calendario",
+  produccion: "Producción", qr: "Tarjetas QR", facturas: "Facturación", ocr: "Escáner Inteligente",
+  reportes: "Reportes", usuarios: "Usuarios", config: "Configuración", integraciones: "Integraciones",
+};
+const SECCION_DE: Record<Route, string> = {
+  dashboard: "Inicio", clientes: "CRM", escuelas: "CRM", docentes: "CRM", estudiantes: "CRM",
+  ventas: "CRM", paquetes: "CRM", cotizaciones: "CRM", mensajes: "CRM", sesiones: "Operaciones",
+  agenda: "Operaciones", produccion: "Operaciones", qr: "Operaciones", facturas: "Operaciones",
+  ocr: "Operaciones", reportes: "Administración", usuarios: "Administración", config: "Sistema", integraciones: "Sistema",
+};
 
 /* Buscador global con Ctrl+K */
 function GlobalSearch() {
   const { db, setRoute } = useApp();
   const [q, setQ] = useState("");
-  const [focus, setFocus] = useState(false);
+  const [open, setOpen] = useState(false);
+  const [mobile, setMobile] = useState(false);
   const ref = useRef<HTMLInputElement>(null);
-
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") { e.preventDefault(); ref.current?.focus(); }
-      if (e.key === "Escape") { setFocus(false); ref.current?.blur(); }
+    const h = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") { e.preventDefault(); ref.current?.focus(); setOpen(true); }
+      if (e.key === "Escape") setOpen(false);
     };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    window.addEventListener("keydown", h);
+    return () => window.removeEventListener("keydown", h);
   }, []);
-
   const resultados = useMemo(() => {
     const t = q.trim().toLowerCase();
-    if (!t) return [];
+    if (t.length < 2) return [];
     return db.estudiantes.filter((e) => [e.nombre, e.ci, e.pedido, e.representante].some((v) => v.toLowerCase().includes(t))).slice(0, 7);
   }, [q, db.estudiantes]);
-
-  return (
-    <div className="search-box">
-      <Search size={15} className="search-ic" />
-      <input
-        ref={ref}
-        value={q}
-        onChange={(e) => setQ(e.target.value)}
-        onFocus={() => setFocus(true)}
-        onBlur={() => setTimeout(() => setFocus(false), 150)}
-        placeholder="Buscar estudiante, pedido, cédula…"
-        aria-label="Buscar"
-      />
-      {q ? (
-        <button className="search-clear" onClick={() => setQ("")} aria-label="Limpiar"><X size={11} /></button>
-      ) : (
-        <span className="kbd d-none d-md-inline">Ctrl K</span>
-      )}
-      {focus && q && (
+  const ir = (id: string) => { setRoute("estudiantes", { open: id }); setOpen(false); setQ(""); setMobile(false); };
+  const box = (
+    <div className="position-relative flex-grow-1" style={{ maxWidth: 430 }}>
+      <div className="search-box" style={{ maxWidth: "none" }}>
+        <Search size={15} className="search-ic" />
+        <input ref={ref} value={q} onChange={(e) => { setQ(e.target.value); setOpen(true); }} onFocus={() => setOpen(true)} placeholder="Buscar estudiante, cédula, pedido…  (Ctrl+K)" />
+        {q && <button className="tool-search-clear" onClick={() => { setQ(""); setOpen(false); }} aria-label="Limpiar"><X size={11} /></button>}
+      </div>
+      {open && q.trim().length >= 2 && (
         <div className="search-drop">
           {resultados.length === 0 ? (
             <div className="px-3 py-3" style={{ fontSize: 12.5, color: "var(--ink-faint)" }}>Sin resultados para “{q}”</div>
-          ) : (
-            resultados.map((e) => {
-              const t = estudianteTotales(e);
-              return (
-                <button key={e.id} className="search-item" onClick={() => { setRoute("estudiantes", { open: e.id }); setQ(""); }}>
-                  <span className="search-av">{e.nombre[0]}</span>
-                  <span className="flex-grow-1" style={{ minWidth: 0 }}>
-                    <span className="d-block font-display fw-semibold" style={{ fontSize: 13 }}>{e.nombre}</span>
-                    <span className="d-block" style={{ fontSize: 11, color: "var(--ink-faint)" }}>{e.pedido} · {e.ci || "S/C"} · saldo {fmtUSD(t.saldo)}</span>
-                  </span>
-                  <ChevronRight size={14} style={{ color: "var(--ink-faint)" }} />
-                </button>
-              );
-            })
-          )}
+          ) : resultados.map((e) => {
+            const t = estudianteTotales(e);
+            return (
+              <button key={e.id} className="search-item" onClick={() => ir(e.id)}>
+                <span className="d-flex align-items-center justify-content-center rounded-3 font-display fw-bold" style={{ width: 34, height: 34, background: "var(--tint-navy-2)", color: "var(--jyg-navy)", fontSize: 12, flexShrink: 0 }}>{e.nombre[0]}</span>
+                <span className="flex-grow-1" style={{ minWidth: 0 }}>
+                  <span className="d-block font-display fw-semibold text-truncate" style={{ fontSize: 12.5 }}>{e.nombre}</span>
+                  <span className="d-block" style={{ fontSize: 11, color: "var(--ink-faint)" }}>{e.pedido} · {e.ci || "S/C"} · saldo {t.saldo > 0 ? "$" + t.saldo.toFixed(2) : "pagado"}</span>
+                </span>
+                <ChevronRight size={14} style={{ color: "var(--ink-faint)" }} />
+              </button>
+            );
+          })}
         </div>
       )}
     </div>
   );
+  return (
+    <>
+      <span className="d-none d-md-flex flex-grow-1" style={{ minWidth: 0 }}>{box}</span>
+      <button className="nav-tile d-md-none" onClick={() => setMobile(!mobile)} aria-label="Buscar"><Search size={16} /></button>
+      {mobile && <div className="position-fixed d-md-none" style={{ top: 60, left: 0, right: 0, zIndex: 1300, padding: "8px 12px", background: "var(--card-bg)", borderBottom: "1px solid var(--line-soft)" }}>{box}</div>}
+    </>
+  );
 }
 
 function ThemeToggle() {
-  const { dark, toggleDark } = useApp();
+  const [dark, setDark] = useState(() => document.documentElement.classList.contains("dark"));
+  const toggle = () => {
+    const next = !dark;
+    setDark(next);
+    document.documentElement.classList.toggle("dark", next);
+    document.documentElement.setAttribute("data-bs-theme", next ? "dark" : "light");
+    try { localStorage.setItem("jyg-theme", next ? "dark" : "light"); } catch { /* noop */ }
+  };
   return (
-    <button className={`theme-pill ${dark ? "on" : ""}`} onClick={toggleDark} role="switch" aria-checked={dark} aria-label="Cambiar tema" title={dark ? "Modo claro" : "Modo oscuro"}>
-      <Sun size={11} className="tp-ic tp-sun" />
-      <Moon size={11} className="tp-ic tp-moon" />
-      <span className="theme-knob">{dark ? <Moon size={11} /> : <Sun size={11} />}</span>
+    <button className="nav-tile" onClick={toggle} title={dark ? "Modo claro" : "Modo oscuro"} aria-label="Cambiar tema">
+      {dark ? <Sun size={16} style={{ color: "var(--jyg-gold)" }} /> : <Moon size={16} />}
     </button>
   );
 }
 
 export default function Shell({ children }: { children: React.ReactNode }) {
-  const { route, setRoute, can, collapsed, setCollapsed, mobileNav, setMobileNav, setOcrOpen, user, alerts } = useApp();
-  const permitido = can(route);
-  const [scrolled, setScrolled] = useState(false);
+  const { db, route, setRoute, can, user, setCurrentUser, alerts, setOcrOpen, tasa, refreshTasa, tasaLoading } = useApp();
+  const [mini, setMini] = useState(false);
+  const [movil, setMovil] = useState(false);
   const [bellOpen, setBellOpen] = useState(false);
   const [profOpen, setProfOpen] = useState(false);
+  const [scrolled, setScrolled] = useState(false);
+  const now = useNow(1000);
+  const permitido = can(route);
 
   useEffect(() => {
-    const onScroll = () => setScrolled(window.scrollY > 6);
-    onScroll();
-    window.addEventListener("scroll", onScroll, { passive: true });
-    return () => window.removeEventListener("scroll", onScroll);
+    const h = () => setScrolled(window.scrollY > 6);
+    h(); window.addEventListener("scroll", h, { passive: true });
+    return () => window.removeEventListener("scroll", h);
+  }, []);
+  /* estado inicial responsive + ajuste en resize */
+  useEffect(() => {
+    const h = () => { if (window.innerWidth > 991) setMovil(false); };
+    h(); window.addEventListener("resize", h);
+    return () => window.removeEventListener("resize", h);
   }, []);
 
-  const go = (r: Route) => { setRoute(r); setMobileNav(false); };
+  const go = (r: Route) => { setRoute(r); setMovil(false); setBellOpen(false); setProfOpen(false); };
+
+  const sidebar = (
+    <>
+      <div className="brand">
+        <span className="mark"><GraduationCap size={23} /></span>
+        <span className="brand-txt"><b>Promociones JyG</b><small>CRM de Grados</small></span>
+        <button className="icon-btn d-lg-none ms-auto" style={{ width: 30, height: 30 }} onClick={() => setMovil(false)} aria-label="Cerrar"><X size={15} /></button>
+      </div>
+      {MODULOS_GRUPOS.map((g) => {
+        const visibles = g.items.filter((i) => can(i.ruta as Route));
+        if (visibles.length === 0) return null;
+        return (
+          <div key={g.seccion}>
+            <div className="side-label">{g.seccion}</div>
+            {visibles.map((i) => {
+              const Ic = ICONOS_MODULO[i.ruta] || LayoutDashboard;
+              return (
+                <button key={i.ruta} className={`nav-item ${route === i.ruta ? "active" : ""}`} onClick={() => go(i.ruta as Route)} data-title={i.label} aria-label={i.label}>
+                  <Ic size={19} />
+                  <span>{i.label}</span>
+                </button>
+              );
+            })}
+          </div>
+        );
+      })}
+      <div className="mt-auto" />
+      <div className="user-card">
+        <span className="av">{user.nombre.split(" ").map((p) => p[0]).slice(0, 2).join("")}</span>
+        <span className="user-txt">
+          <b>{user.nombre}</b>
+          <small><span className="live" />{ROL_LABEL[user.rol]}</small>
+        </span>
+      </div>
+    </>
+  );
 
   return (
     <>
-      {/* Sidebar escritorio / tablet */}
-      <aside className={`jyg-sidebar-col d-none d-lg-flex ${collapsed ? "mini" : ""}`}>
-        <div className="p-3 border-bottom" style={{ borderColor: "var(--line-soft)" }}><BrandMark /></div>
-        <MenuList onGo={go} mini={collapsed} />
-        <div className="sidebar-foot">Promociones JyG · {new Date().getFullYear()}</div>
-      </aside>
+      {/* Sidebar escritorio (colapsable) */}
+      <aside className={`jyg-sidebar-col d-none d-lg-flex ${mini ? "mini" : ""}`}>{sidebar}</aside>
+      {/* Sidebar móvil (deslizable) */}
+      {movil && <div className="sidebar-veil" onClick={() => setMovil(false)} />}
+      <aside className={`jyg-sidebar-col d-lg-none ${movil ? "show" : ""}`}>{sidebar}</aside>
 
-      {/* Offcanvas móvil */}
-      <div className={`offcanvas offcanvas-start d-lg-none ${mobileNav ? "show" : ""}`} tabIndex={-1} style={{ visibility: mobileNav ? "visible" : "hidden", width: 280 }}>
-        <div className="offcanvas-header border-bottom" style={{ borderColor: "var(--line-soft)" }}>
-          <BrandMark />
-          <button type="button" className="btn-close" onClick={() => setMobileNav(false)} aria-label="Cerrar" />
-        </div>
-        <div className="offcanvas-body d-flex flex-column p-0">
-          <MenuList onGo={go} />
-        </div>
-      </div>
-      {mobileNav && <div className="offcanvas-backdrop fade show d-lg-none" onClick={() => setMobileNav(false)} />}
+      <div id="content" className={mini ? "mini" : ""}>
+        <header className={`jyg-topbar ${scrolled ? "scrolled" : ""}`}>
+          <button className="nav-tile d-lg-none" onClick={() => setMovil(true)} aria-label="Abrir menú"><Menu size={17} /></button>
+          <button className="nav-tile d-none d-lg-inline-flex" onClick={() => setMini(!mini)} title={mini ? "Expandir menú" : "Colapsar menú"} aria-label="Alternar menú"><Menu size={17} /></button>
 
-      {/* Contenido */}
-      <div id="content" className={collapsed ? "mini" : ""}>
-        <header className={`jyg-topbar sticky-top d-flex ${scrolled ? "scrolled" : ""}`}>
-          <div className="topbar-inner">
-            <button
-              className={`nav-tile ${collapsed ? "active" : ""}`}
-              onClick={() => setCollapsed(!collapsed)}
-              aria-label="Colapsar menú"
-              title={collapsed ? "Expandir menú" : "Colapsar menú"}
-            >
-              <Menu size={18} />
+          <div className="d-none d-sm-flex align-items-center gap-2" style={{ minWidth: 0 }}>
+            <span className="crumb" style={{ margin: 0 }}>{SECCION_DE[route]}</span>
+            <ChevronRight size={13} style={{ color: "var(--ink-faint)" }} />
+            <span className="font-display fw-semibold text-truncate" style={{ fontSize: 13.5, color: "var(--ink)" }}>{ROUTE_TITLE[route]}</span>
+          </div>
+
+          <GlobalSearch />
+
+          <div className="topbar-right">
+            {/* Tasa del día en vivo */}
+            <button className="d-none d-xl-flex align-items-center gap-2 rounded-pill border-0 px-3" onClick={() => void refreshTasa()} title="Clic para actualizar la tasa (ve.dolarapi.com)" style={{ height: 38, background: "var(--tint-gold)", color: "var(--jyg-gold-deep)", cursor: "pointer", fontFamily: "var(--poppins)" }}>
+              <span className={`d-inline-block ${tasaLoading ? "spin" : "pulse-dot"}`} style={{ width: 7, height: 7, borderRadius: 99, background: tasa.apiOk ? "var(--ok)" : "var(--warn)" }} />
+              <span className="fw-bold tabular-nums" style={{ fontSize: 13 }}>{tasaLoading ? "…" : fmtBs(tasa.usd)}<span style={{ opacity: 0.7, fontSize: 10 }}> /$</span></span>
+              <span style={{ fontSize: 10, opacity: 0.75 }}>{fmtHaceSegundos(tasa.updated, now)}</span>
             </button>
-            <button className="nav-tile d-lg-none" onClick={() => setMobileNav(true)} aria-label="Abrir menú"><Menu size={18} /></button>
 
-            <div className="topbar-crumb d-none d-md-flex">
-              <span className="crumb-chip">{SECTION_OF[route]}</span>
-              <ChevronRight size={13} style={{ color: "var(--ink-faint)" }} />
-              <span className="crumb-page">{ROUTE_TITLE[route]}</span>
+            <ThemeToggle />
+            <span className="vr-sep d-none d-sm-block" />
+
+            <div className="position-relative">
+              <button className="nav-tile" onClick={() => { setBellOpen(!bellOpen); setProfOpen(false); }} aria-label="Notificaciones">
+                <Bell size={16} />
+                {alerts.length > 0 && <span className="bell-badge">{alerts.length}</span>}
+              </button>
+              {bellOpen && (
+                <div className="search-drop" style={{ right: 0, left: "auto", width: 310 }}>
+                  <div className="px-3 py-2 font-display fw-semibold" style={{ fontSize: 12.5, borderBottom: "1px solid var(--line-soft)" }}>Alertas operativas</div>
+                  {alerts.length === 0 ? (
+                    <div className="px-3 py-3" style={{ fontSize: 12.5, color: "var(--ink-faint)" }}>Todo al día, sin alertas 🎉</div>
+                  ) : alerts.map((a) => (
+                    <button key={a.key} className="search-item" onClick={() => go(a.route)}>
+                      <span className="flex-grow-1" style={{ minWidth: 0 }}>
+                        <span className="d-block font-display fw-semibold" style={{ fontSize: 12.5 }}>{a.title}</span>
+                        <span className="d-block" style={{ fontSize: 11, color: "var(--ink-faint)" }}>{a.desc}</span>
+                      </span>
+                      <ChevronRight size={14} style={{ color: "var(--ink-faint)" }} />
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
 
-            <GlobalSearch />
-
-            <div className="topbar-right">
-              <ThemeToggle />
-              <span className="vr-sep" />
-
-              <div className="position-relative">
-                <button className="nav-tile" onClick={() => { setBellOpen(!bellOpen); setProfOpen(false); }} aria-label="Notificaciones">
-                  <Bell size={17} />
-                  {alerts.length > 0 && <span className="bell-badge">{alerts.length}</span>}
-                </button>
-                {bellOpen && (
-                  <div className="search-drop" style={{ right: 0, left: "auto", width: 300 }}>
-                    <div className="px-3 py-2 font-display fw-semibold" style={{ fontSize: 12.5, borderBottom: "1px solid var(--line-soft)" }}>Alertas</div>
-                    {alerts.length === 0 ? (
-                      <div className="px-3 py-3" style={{ fontSize: 12.5, color: "var(--ink-faint)" }}>Todo al día, sin alertas.</div>
-                    ) : (
-                      alerts.map((a) => (
-                        <button key={a.key} className="search-item" onClick={() => { go(a.route); setBellOpen(false); }}>
-                          <span className="flex-grow-1" style={{ minWidth: 0 }}>
-                            <span className="d-block font-display fw-semibold" style={{ fontSize: 12.5 }}>{a.title}</span>
-                            <span className="d-block" style={{ fontSize: 11, color: "var(--ink-faint)" }}>{a.desc}</span>
-                          </span>
-                          <ChevronRight size={14} style={{ color: "var(--ink-faint)" }} />
-                        </button>
-                      ))
-                    )}
-                  </div>
-                )}
-              </div>
-
-              <div className="position-relative">
-                <button className="avatar-btn" onClick={() => { setProfOpen(!profOpen); setBellOpen(false); }} aria-label="Perfil">
-                  <span className="av">{user.nombre.split(" ").map((p) => p[0]).slice(0, 2).join("")}</span>
-                  <span className="d-none d-sm-block text-start">
-                    <span className="d-block font-display fw-semibold" style={{ fontSize: 12.5, lineHeight: 1.1 }}>{user.nombre}</span>
-                    <span className="d-block" style={{ fontSize: 10.5, color: "var(--ink-faint)" }}>{user.rol}</span>
-                  </span>
-                  <ChevronDown size={13} style={{ color: "var(--ink-faint)" }} />
-                </button>
-                {profOpen && (
-                  <div className="search-drop" style={{ right: 0, left: "auto", width: 220 }}>
-                    <div className="px-3 py-2" style={{ borderBottom: "1px solid var(--line-soft)" }}>
-                      <span className="d-block font-display fw-semibold" style={{ fontSize: 13 }}>{user.nombre}</span>
-                      <span className="d-block" style={{ fontSize: 11, color: "var(--ink-faint)" }}>@{user.usuario}</span>
-                    </div>
-                    <button className="search-item" onClick={() => { go("config"); setProfOpen(false); }}><Settings size={14} /> Configuración</button>
-                    <button className="search-item" onClick={() => { go("usuarios"); setProfOpen(false); }}><UserCog size={14} /> Usuarios</button>
-                  </div>
-                )}
-              </div>
+            <div className="position-relative">
+              <button className="avatar-btn" onClick={() => { setProfOpen(!profOpen); setBellOpen(false); }} aria-label="Perfil">
+                <span className="av">{user.nombre.split(" ").map((p) => p[0]).slice(0, 2).join("")}</span>
+                <span className="d-none d-sm-block text-start">
+                  <span className="d-block font-display fw-semibold" style={{ fontSize: 12.5, lineHeight: 1.1 }}>{user.nombre}</span>
+                  <span className="d-block" style={{ fontSize: 10.5, color: "var(--ink-faint)" }}>{ROL_LABEL[user.rol]}</span>
+                </span>
+                <ChevronDown size={13} style={{ color: "var(--ink-faint)" }} />
+              </button>
+              {profOpen && (
+                <div className="search-drop" style={{ right: 0, left: "auto", width: 250 }}>
+                  <div className="px-3 py-2 font-display fw-semibold" style={{ fontSize: 12.5, borderBottom: "1px solid var(--line-soft)" }}>Cambiar usuario</div>
+                  {db.usuarios.filter((u) => u.activo).map((u) => (
+                    <button key={u.id} className="search-item" onClick={() => { setCurrentUser(u.id); setProfOpen(false); }}>
+                      <span className="d-flex align-items-center justify-content-center rounded-3 font-display fw-bold" style={{ width: 30, height: 30, background: u.id === user.id ? "var(--jyg-navy)" : "var(--tint-navy-2)", color: u.id === user.id ? "#ffd970" : "var(--jyg-navy)", fontSize: 11, flexShrink: 0 }}>{u.nombre.split(" ").map((p) => p[0]).slice(0, 2).join("")}</span>
+                      <span className="flex-grow-1" style={{ minWidth: 0 }}>
+                        <span className="d-block font-display fw-semibold" style={{ fontSize: 12.5 }}>{u.nombre}</span>
+                        <span className="d-block" style={{ fontSize: 10.5, color: "var(--ink-faint)" }}>{ROL_LABEL[u.rol]}</span>
+                      </span>
+                      {u.id === user.id && <span className="dot" style={{ background: "var(--ok)" }} />}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
         </header>
 
         <main>
-          {permitido ? (
-            children
-          ) : (
+          {permitido ? children : (
             <div className="page">
               <div className="card p-5 text-center" style={{ maxWidth: 480, margin: "60px auto" }}>
                 <h3 className="font-display fw-bold">Acceso restringido</h3>
-                <p style={{ color: "var(--ink-soft)", fontSize: 13.5 }}>
-                  Tu rol <b>{user.rol}</b> no tiene permiso para ver este módulo.
-                </p>
+                <p style={{ color: "var(--ink-soft)", fontSize: 13.5 }}>Tu rol <b>{ROL_LABEL[user.rol]}</b> no tiene permiso para ver este módulo.</p>
                 <button className="btn btn-primary" onClick={() => setRoute("dashboard")}>Ir al Dashboard</button>
               </div>
             </div>
@@ -308,9 +262,9 @@ export default function Shell({ children }: { children: React.ReactNode }) {
         </main>
       </div>
 
-      {/* Botón flotante OCR */}
-      <button className="fab-ocr" onClick={() => setOcrOpen(true)} title="Escáner OCR inteligente — C.I. y partida de nacimiento" aria-label="Escáner OCR">
-        <ScanLine size={24} />
+      {/* Botón flotante del escáner */}
+      <button className="fab-ocr" onClick={() => setOcrOpen(true)} title="Escáner Inteligente — C.I. y partida de nacimiento" aria-label="Escáner">
+        <ScanLine size={26} />
         <span className="fab-tip">Escanear C.I. / Partida</span>
       </button>
     </>
