@@ -75,8 +75,11 @@ body::after {
 }
 .jyg-sidebar-col.mini { width: 78px; }
 .jyg-sidebar-col.mini .side-label, .jyg-sidebar-col.mini .brand-txt, .jyg-sidebar-col.mini .user-txt { display: none; }
-.jyg-sidebar-col.mini .nav-item { justify-content: center; padding: 11px 0; margin: 2px 10px; width: calc(100% - 20px); }
-.jyg-sidebar-col.mini .user-card { justify-content: center; padding: 10px 6px; }
+.jyg-sidebar-col.mini .nav-item { justify-content: center; padding: 11px 0; margin: 2px 10px; width: calc(100% - 20px); gap: 0; }
+/* Al colapsar: solo el icono, sin texto */
+.jyg-sidebar-col.mini .nav-item span { display: none; }
+.jyg-sidebar-col.mini .nav-item svg { flex-shrink: 0; }
+.jyg-sidebar-col.mini .user-card { justify-content: center; padding: 10px 6px; gap: 0; }
 /* Tooltip al pasar el cursor en modo colapsado */
 .jyg-sidebar-col.mini .nav-item::after {
   content: attr(data-title); position: absolute; left: calc(100% + 14px); top: 50%;
