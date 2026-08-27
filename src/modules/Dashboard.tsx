@@ -135,11 +135,6 @@ export default function Dashboard() {
             <span className="rb-v gold">{tasaLoading ? "…" : fmtBs(tasa.eur)}<small>Bs / €</small></span>
             <span className="rb-s">{cross > 0 ? `1 € ≈ ${cross.toFixed(3)} $` : "fuente oficial BCV"}</span>
           </div>
-          <div className="rb-cell">
-            <span className="rb-k">Caja de la temporada</span>
-            <span className="rb-v">{fmtUSD(k.cobrado)}</span>
-            <span className="rb-s">saldo {fmtUSD(k.pendiente)} · {fmtBs(k.pendiente * tasa.usd)}</span>
-          </div>
           <button className="rb-btn" onClick={() => void refreshTasa()} disabled={tasaLoading} title="Consultar ve.dolarapi.com">
             <RefreshCw size={14} className={tasaLoading ? "spin" : ""} />
             {tasaLoading ? "Consultando…" : `Actualizar · ${fmtHaceSegundos(tasa.updated, now)}`}
