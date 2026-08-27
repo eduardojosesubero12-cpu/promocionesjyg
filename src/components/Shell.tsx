@@ -1,12 +1,11 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
-  BarChart3, Bell, Boxes, CalendarDays, Camera, ChevronDown, ChevronRight, Contact, DollarSign,
+  BarChart3, Bell, Boxes, CalendarDays, Camera, ChevronDown, ChevronRight, Contact,
   GraduationCap, LayoutDashboard, LogOut, Menu, MessageSquare, Moon, Package, Plug, QrCode,
   Receipt, ScanLine, School, Search, Settings, Sun, Ticket, UserCog, Users, Wallet, X,
 } from "lucide-react";
 import { useApp, ROUTE_TITLE, SECTION_OF, type Route } from "../lib/store";
-import { fmtBs, fmtHaceSegundos, fmtUSD, estudianteTotales } from "../lib/data";
-import { useNow } from "./ui";
+import { fmtUSD, estudianteTotales } from "../lib/data";
 
 const MENU: { section: string; items: { id: Route; label: string; icon: any }[] }[] = [
   { section: "", items: [{ id: "dashboard", label: "Dashboard", icon: LayoutDashboard }] },
@@ -102,25 +101,6 @@ function BrandMark() {
         <small>CRM de Grados</small>
       </span>
     </div>
-  );
-}
-
-/* Chip de tasa en vivo */
-function TasaChip() {
-  const { tasa, tasaLoading, refreshTasa, setRoute } = useApp();
-  const now = useNow(1000);
-  return (
-    <button
-      className="tasa-chip"
-      onClick={() => setRoute("integraciones")}
-      title={`Tasa del día · ${tasa.apiOk ? "ve.dolarapi.com" : "tasa de respaldo"} · actualizada ${fmtHaceSegundos(tasa.updated, now)}`}
-    >
-      <span className="tasa-ic"><DollarSign size={13} /></span>
-      <span className="tasa-chip-txt text-start">
-        <b className="tabular-nums">{tasaLoading ? "…" : fmtBs(tasa.usd)}</b>
-        <small>tasa del día {tasa.eur > 0 && `· € ${fmtBs(tasa.eur).replace("Bs ", "")}`}</small>
-      </span>
-    </button>
   );
 }
 
@@ -259,7 +239,6 @@ export default function Shell({ children }: { children: React.ReactNode }) {
             <GlobalSearch />
 
             <div className="topbar-right">
-              <TasaChip />
               <ThemeToggle />
               <span className="vr-sep" />
 

@@ -536,35 +536,52 @@ export function Integraciones() {
         <button className="btn btn-ghost" onClick={() => void refreshTasa()} disabled={tasaLoading}><RefreshCw size={15} className={tasaLoading ? "spin" : ""} /> Actualizar tasa</button>
       </div>
 
-      {/* Supabase */}
+      {/* ============ BASE DE DATOS EN SUPABASE (organizada en pasos) ============ */}
+
+      {/* Encabezado con estado de conexión */}
       <div className="card overflow-hidden mb-4">
         <div className="p-4 d-flex align-items-center gap-3 flex-wrap" style={{ background: "linear-gradient(135deg, var(--jyg-navy), #0a2a4d)", color: "#fff" }}>
-          <span className="d-flex align-items-center justify-content-center rounded-3 flex-shrink-0" style={{ width: 44, height: 44, background: "rgba(255,217,112,0.18)", color: "#ffd970" }}><Cloud size={22} /></span>
-          <div className="flex-grow-1" style={{ minWidth: 220 }}>
-            <h3 className="font-display fw-bold m-0" style={{ fontSize: 17, color: "#fff" }}>Base de datos en la nube</h3>
-            <p style={{ fontSize: 12, margin: 0, color: "rgba(255,255,255,0.72)" }}>Recomendación para JyG: <b>Supabase (PostgreSQL)</b> — una tabla por módulo, gratis y en tiempo real</p>
+          <span className="d-flex align-items-center justify-content-center rounded-3 flex-shrink-0" style={{ width: 46, height: 46, background: "rgba(255,217,112,0.18)", color: "#ffd970" }}><Cloud size={23} /></span>
+          <div className="flex-grow-1" style={{ minWidth: 200 }}>
+            <h3 className="font-display fw-bold m-0" style={{ fontSize: 17, color: "#fff" }}>Base de datos en Supabase</h3>
+            <p style={{ fontSize: 12, margin: "2px 0 0", color: "rgba(255,255,255,0.72)" }}>Una tabla por módulo · PostgreSQL en la nube · respaldo en línea del CRM</p>
           </div>
-          <button className="btn btn-gold btn-sm" onClick={() => setVerSql(!verSql)}><Database size={13} /> {verSql ? "Ocultar esquema SQL" : "Ver esquema SQL"}</button>
+          <span className={`sb-status ${db.config.supabaseUrl ? (pingState === "ok" ? "ok" : "warn") : "off"}`}>
+            <span className={`rounded-circle ${db.config.supabaseUrl ? "pulse-dot" : ""}`} style={{ width: 8, height: 8, background: db.config.supabaseUrl ? "var(--ok)" : "var(--ink-faint)" }} />
+            {db.config.supabaseUrl ? (pingState === "ok" ? "Conectada" : "Configurada") : "Sin configurar"}
+          </span>
         </div>
 
-        {verSql && (
-          <div className="position-relative m-4 rounded-3 overflow-hidden" style={{ background: "#0b1626", border: "1px solid #1d3350" }}>
-            <div className="d-flex align-items-center justify-content-between px-3 py-2" style={{ background: "#0e1d33" }}>
-              <span className="d-flex align-items-center gap-2 font-display fw-semibold" style={{ fontSize: 11, color: "#7fa3cf" }}><Database size={13} /> esquema.sql · una tabla por módulo</span>
-              <button className="btn btn-xs" style={{ background: "rgba(255,217,112,0.15)", color: "#ffd970", border: "1px solid rgba(255,217,112,0.4)" }} onClick={() => { navigator.clipboard?.writeText(SUPABASE_SQL).then(() => toast("SQL copiado", "ok")).catch(() => undefined); }}><Copy size={12} /> Copiar</button>
+        {/* Resumen rápido: 3 hitos */}
+        <div className="row g-3 p-4" style={{ background: "var(--card-bg-2)" }}>
+          {[
+            { n: "1", t: "Conectar", d: "URL + anon key", done: !!db.config.supabaseUrl, ic: <Plug size={15} /> },
+            { n: "2", t: "Crear esquema", d: `${DB_TABLES.length} tablas SQL`, done: pingState === "ok", ic: <Database size={15} /> },
+            { n: "3", t: "Sincronizar", d: "Subir / restaurar", done: !!syncInfo?.ok, ic: <UploadCloud size={15} /> },
+          ].map((s) => (
+            <div key={s.n} className="col-12 col-md-4">
+              <div className="d-flex align-items-center gap-3 p-3 rounded-3" style={{ background: "var(--card-bg)", border: "1px solid var(--line-soft)" }}>
+                <span className={`sb-step-num ${s.done ? "done" : ""}`}>{s.done ? <Check size={15} /> : s.ic}</span>
+                <div style={{ minWidth: 0 }}>
+                  <div className="sb-step-title" style={{ fontSize: 13.5 }}>Paso {s.n} · {s.t}</div>
+                  <div className="sb-step-desc">{s.d}</div>
+                </div>
+              </div>
             </div>
-            <pre className="m-0 p-3 overflow-auto" style={{ color: "#a8c6e8", fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace", fontSize: 11, maxHeight: 260 }}>{SUPABASE_SQL}</pre>
-          </div>
-        )}
+          ))}
+        </div>
+      </div>
 
-        <div className="row g-4 p-4">
-          <div className="col-12 col-lg-6">
-            <div className="d-flex align-items-center justify-content-between mb-2">
-              <span className="font-display fw-semibold text-uppercase" style={{ fontSize: 12, letterSpacing: 1, color: "var(--ink-faint)" }}>Conexión</span>
-              <span className="d-flex align-items-center gap-1" style={{ fontSize: 11.5, fontWeight: 600, color: db.config.supabaseUrl ? "var(--ok)" : "var(--ink-faint)" }}>
-                <span className={`rounded-circle ${db.config.supabaseUrl ? "pulse-dot" : ""}`} style={{ width: 8, height: 8, background: db.config.supabaseUrl ? "var(--ok)" : "var(--line)" }} />
-                {db.config.supabaseUrl ? "Configurada" : "Sin configurar"}
-              </span>
+      <div className="row g-4">
+        {/* PASO 1 · Conexión */}
+        <div className="col-12 col-lg-5">
+          <div className="card sb-step p-4 h-100">
+            <div className="d-flex align-items-center gap-3 mb-3">
+              <span className={`sb-step-num ${db.config.supabaseUrl ? "done" : ""}`}>{db.config.supabaseUrl ? <Check size={15} /> : "1"}</span>
+              <div>
+                <div className="sb-step-title">Conectar el proyecto</div>
+                <div className="sb-step-desc">Pega la URL y la anon key de Supabase.</div>
+              </div>
             </div>
             <Field label="URL del proyecto" hint="https://xxxx.supabase.co">
               <input className="input" style={{ fontFamily: "ui-monospace, monospace", fontSize: 12 }} placeholder="https://xxxx.supabase.co" value={url} onChange={(e) => setUrl(e.target.value)} />
@@ -583,43 +600,82 @@ export function Integraciones() {
               </button>
             </div>
             {pingInfo && pingState === "ok" && <p className="mt-2 mb-0" style={{ fontSize: 12, color: "var(--ok)" }}>{pingInfo.tablas} tablas accesibles · {pingInfo.filas} filas en la nube</p>}
-
-            <div className="mt-3 pt-3 border-top" style={{ borderColor: "var(--line-soft)" }}>
-              <div className="d-flex gap-2 flex-wrap">
-                <button className="btn btn-soft btn-sm" onClick={subir} disabled={syncing || !db.config.supabaseUrl}><UploadCloud size={14} /> {syncing ? "Subiendo…" : "Subir base completa"}</button>
-                <button className="btn btn-ghost btn-sm" onClick={bajar} disabled={syncing || !db.config.supabaseUrl}><Download size={14} /> Restaurar desde la nube</button>
-              </div>
-              <div className="mt-3 p-3 rounded-3 d-flex align-items-start gap-2" style={{ fontSize: 12, background: syncInfo ? (syncInfo.ok ? "var(--tint-ok)" : "var(--tint-danger)") : "var(--card-bg-2)", color: syncInfo ? (syncInfo.ok ? "var(--ok)" : "var(--danger)") : "var(--ink-faint)" }}>
-                <Cloud size={14} className="mt-1 flex-shrink-0" />
-                <span>
-                  {syncInfo ? <><b>{syncInfo.msg}</b><br /><span className="tabular-nums" style={{ opacity: 0.75 }}>{fmtFechaHoraViva(syncInfo.last, nowInt)} · {fmtHaceSegundos(syncInfo.last, nowInt)}</span></> : "Aún no hay sincronizaciones. El CRM guarda todo en este navegador; la nube es tu respaldo en línea."}
-                </span>
-              </div>
-            </div>
+            <p className="mt-3 mb-0 p-3 rounded-3" style={{ fontSize: 12, color: "var(--ink-soft)", background: "var(--card-bg-2)" }}>
+              Encuentra estos datos en Supabase → <b>Settings → API</b> (Project URL y anon public key). La clave es un secreto: nunca la subas al código.
+            </p>
           </div>
+        </div>
 
-          <div className="col-12 col-lg-6">
-            <div className="font-display fw-semibold text-uppercase mb-2" style={{ fontSize: 12, letterSpacing: 1, color: "var(--ink-faint)" }}>Mapa de tablas (una por módulo)</div>
+        {/* PASO 2 · Esquema SQL */}
+        <div className="col-12 col-lg-7">
+          <div className="card sb-step p-4 h-100">
+            <div className="d-flex align-items-center gap-3 mb-3">
+              <span className={`sb-step-num ${pingState === "ok" ? "done" : ""}`}>{pingState === "ok" ? <Check size={15} /> : "2"}</span>
+              <div className="flex-grow-1">
+                <div className="sb-step-title">Crear el esquema SQL</div>
+                <div className="sb-step-desc">Ejecuta este SQL en Supabase → SQL Editor para crear las {DB_TABLES.length} tablas.</div>
+              </div>
+              <button className="btn btn-gold btn-sm" onClick={() => setVerSql(!verSql)}><Database size={13} /> {verSql ? "Ocultar" : "Ver SQL"}</button>
+            </div>
+
+            {verSql && (
+              <div className="position-relative rounded-3 overflow-hidden mb-3" style={{ background: "#0b1626", border: "1px solid #1d3350" }}>
+                <div className="d-flex align-items-center justify-content-between px-3 py-2" style={{ background: "#0e1d33" }}>
+                  <span className="d-flex align-items-center gap-2 font-display fw-semibold" style={{ fontSize: 11, color: "#7fa3cf" }}><Database size={13} /> esquema.sql · una tabla por módulo</span>
+                  <button className="btn btn-xs" style={{ background: "rgba(255,217,112,0.15)", color: "#ffd970", border: "1px solid rgba(255,217,112,0.4)" }} onClick={() => { navigator.clipboard?.writeText(SUPABASE_SQL).then(() => toast("SQL copiado", "ok")).catch(() => undefined); }}><Copy size={12} /> Copiar</button>
+                </div>
+                <pre className="m-0 p-3 overflow-auto" style={{ color: "#a8c6e8", fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace", fontSize: 11, maxHeight: 220 }}>{SUPABASE_SQL}</pre>
+              </div>
+            )}
+
+            <div className="font-display fw-semibold text-uppercase mb-2" style={{ fontSize: 11, letterSpacing: 1, color: "var(--ink-faint)" }}>Mapa de tablas</div>
             <div className="row g-2">
               {DB_TABLES.map((t) => {
                 const st = tablaEstado[t.tabla];
                 const bg = st === "ok" ? "var(--tint-ok)" : st === "err" ? "var(--tint-danger)" : st === "busy" ? "var(--tint-warn)" : "var(--card-bg-2)";
                 return (
-                  <div key={t.tabla} className="col-6">
-                    <div className="d-flex align-items-center gap-2 p-2 rounded-3" style={{ background: bg, fontSize: 12, transition: "background .3s" }}>
-                      <Database size={13} style={{ color: "var(--jyg-navy)", flexShrink: 0 }} />
+                  <div key={t.tabla} className="col-6 col-sm-4">
+                    <div className="d-flex align-items-center gap-2 p-2 rounded-3" style={{ background: bg, fontSize: 11.5, transition: "background .3s" }}>
+                      <Database size={12} style={{ color: "var(--jyg-navy)", flexShrink: 0 }} />
                       <span className="flex-grow-1 text-truncate fw-semibold">{t.label}</span>
-                      {st === "busy" && <RefreshCw size={12} className="spin" />}
-                      {st === "ok" && <Check size={13} style={{ color: "var(--ok)" }} />}
-                      {st === "err" && <AlertTriangle size={13} style={{ color: "var(--danger)" }} />}
+                      {st === "busy" && <RefreshCw size={11} className="spin" />}
+                      {st === "ok" && <Check size={12} style={{ color: "var(--ok)" }} />}
+                      {st === "err" && <AlertTriangle size={12} style={{ color: "var(--danger)" }} />}
                     </div>
                   </div>
                 );
               })}
             </div>
-            <div className="mt-3 p-3 rounded-3" style={{ background: "var(--card-bg-2)", fontSize: 12.5, color: "var(--ink-soft)" }}>
-              <b className="font-display">¿Y cuando JyG crezca?</b><br />
-              Supabase ya soporta multi-sucursal, reportes SQL y app propia. El CRM exporta/importa JSON, así que migrar es directo.
+          </div>
+        </div>
+      </div>
+
+      {/* PASO 3 · Sincronización */}
+      <div className="card sb-step p-4 mt-4">
+        <div className="row g-4 align-items-start">
+          <div className="col-12 col-lg-5">
+            <div className="d-flex align-items-center gap-3 mb-3">
+              <span className={`sb-step-num ${syncInfo?.ok ? "done" : ""}`}>{syncInfo?.ok ? <Check size={15} /> : "3"}</span>
+              <div>
+                <div className="sb-step-title">Sincronizar datos</div>
+                <div className="sb-step-desc">Sube el CRM a la nube o restáuralo desde ella.</div>
+              </div>
+            </div>
+            <div className="d-flex gap-2 flex-wrap">
+              <button className="btn btn-primary btn-sm" onClick={subir} disabled={syncing || !db.config.supabaseUrl}><UploadCloud size={14} /> {syncing ? "Subiendo…" : "Subir base completa"}</button>
+              <button className="btn btn-ghost btn-sm" onClick={bajar} disabled={syncing || !db.config.supabaseUrl}><Download size={14} /> Restaurar desde la nube</button>
+            </div>
+            <div className="mt-3 p-3 rounded-3 d-flex align-items-start gap-2" style={{ fontSize: 12, background: syncInfo ? (syncInfo.ok ? "var(--tint-ok)" : "var(--tint-danger)") : "var(--card-bg-2)", color: syncInfo ? (syncInfo.ok ? "var(--ok)" : "var(--danger)") : "var(--ink-faint)" }}>
+              <Cloud size={14} className="mt-1 flex-shrink-0" />
+              <span>
+                {syncInfo ? <><b>{syncInfo.msg}</b><br /><span className="tabular-nums" style={{ opacity: 0.75 }}>{fmtFechaHoraViva(syncInfo.last, nowInt)} · {fmtHaceSegundos(syncInfo.last, nowInt)}</span></> : "Aún no hay sincronizaciones. El CRM guarda todo en este navegador; la nube es tu respaldo en línea."}
+              </span>
+            </div>
+          </div>
+          <div className="col-12 col-lg-7">
+            <div className="p-3 rounded-3 h-100" style={{ background: "var(--card-bg-2)", fontSize: 12.5, color: "var(--ink-soft)" }}>
+              <b className="font-display" style={{ color: "var(--ink)" }}>¿Y cuando JyG crezca?</b>
+              <p className="mt-1 mb-0">Supabase soporta multi-sucursal, reportes SQL y una app propia. Como el CRM exporta/importa JSON, migrar de un dispositivo a otro —o a un plan superior— es directo.</p>
             </div>
           </div>
         </div>
