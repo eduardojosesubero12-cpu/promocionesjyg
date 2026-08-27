@@ -1,9 +1,22 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Bell, ChevronDown, ChevronRight, GraduationCap, Menu, Moon, ScanLine, Search, Sun, X } from "lucide-react";
+import {
+  BarChart3, Bell, CalendarDays, Camera, ChevronDown, ChevronRight, FileText, GraduationCap,
+  LayoutDashboard, Menu, MessageSquare, Moon, Package, Plug, QrCode, Receipt, ScanLine, School,
+  Search, Settings, ShoppingBag, Sun, UserCog, Users, Wallet, X, type LucideIcon,
+} from "lucide-react";
 import { useApp } from "../lib/store";
 import type { Route } from "../lib/store";
 import { MODULOS_GRUPOS, ROL_LABEL, fmtBs, fmtHaceSegundos, estudianteTotales } from "../lib/data";
 import { useNow } from "./ui";
+
+/* Un icono propio para cada módulo (nítidos y consistentes en expandido y colapsado) */
+const ICONOS_MODULO: Record<string, LucideIcon> = {
+  dashboard: LayoutDashboard, clientes: Users, escuelas: School, docentes: GraduationCap,
+  estudiantes: UserCog, ventas: ShoppingBag, paquetes: Package, cotizaciones: FileText,
+  mensajes: MessageSquare, sesiones: Camera, agenda: CalendarDays, produccion: BarChart3,
+  qr: QrCode, facturas: Receipt, ocr: ScanLine, reportes: BarChart3, usuarios: Users,
+  config: Settings, integraciones: Plug,
+};
 
 export const ROUTE_TITLE: Record<Route, string> = {
   dashboard: "Dashboard", clientes: "Clientes", escuelas: "Escuelas", docentes: "Profesores",
@@ -130,12 +143,15 @@ export default function Shell({ children }: { children: React.ReactNode }) {
         return (
           <div key={g.seccion}>
             <div className="side-label">{g.seccion}</div>
-            {visibles.map((i) => (
-              <button key={i.ruta} className={`nav-item ${route === i.ruta ? "active" : ""}`} onClick={() => go(i.ruta as Route)} title={i.label}>
-                <i className={`bi bi-${g.icon}`} />
-                <span>{i.label}</span>
-              </button>
-            ))}
+            {visibles.map((i) => {
+              const Ic = ICONOS_MODULO[i.ruta] || LayoutDashboard;
+              return (
+                <button key={i.ruta} className={`nav-item ${route === i.ruta ? "active" : ""}`} onClick={() => go(i.ruta as Route)} data-title={i.label} aria-label={i.label}>
+                  <Ic size={19} />
+                  <span>{i.label}</span>
+                </button>
+              );
+            })}
           </div>
         );
       })}
