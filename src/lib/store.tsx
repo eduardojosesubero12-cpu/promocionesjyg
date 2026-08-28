@@ -5,8 +5,9 @@ import {
   codigosCompletos, estudianteTotales, todayISO, uid,
 } from "./data";
 import type {
-  Config, Cotizacion, CRMData, Docente, Escuela, Estudiante, Evento, HistorialTasa,
-  MensajeLog, OcrDraft, PaqueteEscuela, Pago, Rol, Route, Sesion, Usuario,
+  Config, Cotizacion, CRMData, Docente, Escuela, EscaneoLog, Estudiante, Evento, FacturaLog,
+  HistorialTasa, MensajeLog, OcrDraft, PaqueteEscuela, Pago, ProduccionLog, Rol, Route,
+  Sesion, TarjetaLog, Usuario,
 } from "./data";
 export type { Route, Rol };
 
@@ -17,6 +18,7 @@ const seedDB = (): DB => ({
   cotizaciones: SEED_COTIZACIONES, sesiones: SEED_SESIONES, eventos: SEED_EVENTOS,
   mensajes: [], usuarios: SEED_USUARIOS, historialTasas: SEED_HISTORIAL,
   paquetesEscuelas: SEED_PAQUETES_ESCUELAS, config: SEED_CONFIG,
+  facturas: [], tarjetas: [], escaneos: [], produccionLogs: [],
   currentUserId: "u1", seqPedido: 2411, seqCot: 2403,
 });
 const loadDB = (): DB => {
@@ -61,12 +63,18 @@ interface Ctx {
   setConfig: (patch: Partial<Config>) => void;
   deleteTasaHistorial: (id: string) => void; clearTasaHistorial: () => void;
   savePaqueteEscuela: (p: PaqueteEscuela) => void; deletePaqueteEscuela: (id: string) => void;
+  logFactura: (f: Omit<FacturaLog, "id" | "fecha">) => void;
+  logTarjeta: (t: Omit<TarjetaLog, "id" | "fecha">) => void;
+  logEscaneo: (s: Omit<EscaneoLog, "id" | "fecha">) => void;
+  logProduccion: (r: Omit<ProduccionLog, "id" | "fecha">) => void;
   exportBackup: () => string; importBackup: (json: string) => boolean;
   testCloud: (url?: string, key?: string) => Promise<{ tablas: number; filas: number }>;
   syncToCloud: (onTabla?: (t: string, s: "busy" | "ok" | "err", f?: number) => void) => Promise<boolean>;
   restoreFromCloud: () => Promise<boolean>;
   syncInfo: { last: number; ok: boolean; msg: string } | null; syncing: boolean;
   rtEstado: "off" | "on" | "error";
+  cloudStatus: { ok: boolean; tablas: number; filas: number; last: number } | null;
+  testCloudNow: () => Promise<void>;
   alerts: { key: string; title: string; desc: string; route: Route }[];
 }
 
@@ -106,6 +114,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const applyingRemote = useRef(false);  /* evita bucles: no re-subir lo que llegó de la nube */
   const rtTimer = useRef<any>(null);     /* debounce de eventos de tiempo real */
   const [rtEstado, setRtEstado] = useState<"off" | "on" | "error">("off");
+  const [cloudStatus, setCloudStatus] = useState<{ ok: boolean; tablas: number; filas: number; last: number } | null>(null);
 
   /* Persistencia */
   useEffect(() => {
@@ -131,12 +140,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => { void refreshTasa(); }, [refreshTasa]);
   useEffect(() => { const iv = setInterval(() => void refreshTasa(), 5 * 60 * 1000); return () => clearInterval(iv); }, [refreshTasa]);
 
-  /* Auto-sincronización con Supabase (cada cambio local, con debounce).
-     No se ejecuta durante la carga inicial ni al aplicar datos que llegaron de la nube. */
+  /* Auto-sincronización INSTANTÁNEA con Supabase (cada cambio local, con un
+     debounce mínimo para agrupar mutaciones rápidas). No se ejecuta durante
+     la carga inicial ni al aplicar datos que llegaron de la nube. */
   useEffect(() => {
     if (!cloudReady.current || applyingRemote.current) return;
     if (!db.config.autoSyncCloud || !db.config.supabaseUrl || !db.config.supabaseKey) return;
-    const t = setTimeout(() => { void syncToCloud(); }, 2500);
+    const t = setTimeout(() => { void syncToCloud(); }, 600);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [db]);
@@ -209,6 +219,20 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const clearTasaHistorial = useCallback(() => mutate((d) => ({ ...d, historialTasas: [] })), [mutate]);
   const savePaqueteEscuela = useCallback((p: PaqueteEscuela) => mutate((d) => ({ ...d, paquetesEscuelas: upsert(d.paquetesEscuelas, p) })), [mutate]);
   const deletePaqueteEscuela = useCallback((id: string) => mutate((d) => ({ ...d, paquetesEscuelas: d.paquetesEscuelas.filter((x) => x.id !== id) })), [mutate]);
+
+  /* ---- Registro por módulo (una tabla por módulo, sincronizado a Supabase) ---- */
+  const logFactura = useCallback((f: Omit<FacturaLog, "id" | "fecha">) => mutate((d) => ({
+    ...d, facturas: [{ id: uid(), fecha: new Date().toISOString().slice(0, 10), ...f }, ...d.facturas].slice(0, 300),
+  })), [mutate]);
+  const logTarjeta = useCallback((t: Omit<TarjetaLog, "id" | "fecha">) => mutate((d) => ({
+    ...d, tarjetas: [{ id: uid(), fecha: new Date().toISOString().slice(0, 10), ...t }, ...d.tarjetas].slice(0, 300),
+  })), [mutate]);
+  const logEscaneo = useCallback((s: Omit<EscaneoLog, "id" | "fecha">) => mutate((d) => ({
+    ...d, escaneos: [{ id: uid(), fecha: new Date().toISOString().slice(0, 10), ...s }, ...d.escaneos].slice(0, 300),
+  })), [mutate]);
+  const logProduccion = useCallback((r: Omit<ProduccionLog, "id" | "fecha">) => mutate((d) => ({
+    ...d, produccionLogs: [{ id: uid(), fecha: new Date().toISOString().slice(0, 10), ...r }, ...d.produccionLogs].slice(0, 300),
+  })), [mutate]);
   const setRolPermisos = useCallback((rol: Rol, rutas: string[]) => mutate((d) => ({
     ...d, config: { ...d.config, rolesPermisos: { ...(d.config.rolesPermisos || {}), [rol]: rutas } as Record<Rol, string[]> },
   })), [mutate]);
@@ -240,6 +264,23 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const { probarConexion } = await import("./supabase");
     return probarConexion(client);
   }, [clienteSb]);
+  /* Verificación de conexión silenciosa: mantiene el estado "Conectado" siempre actualizado */
+  const testCloudNow = useCallback(async () => {
+    const { supabaseUrl, supabaseKey } = dbRef.current.config;
+    if (!supabaseUrl || !supabaseKey) { setCloudStatus(null); return; }
+    try {
+      const r = await testCloud(supabaseUrl, supabaseKey);
+      setCloudStatus({ ok: true, tablas: r.tablas, filas: r.filas, last: Date.now() });
+    } catch {
+      setCloudStatus({ ok: false, tablas: 0, filas: 0, last: Date.now() });
+    }
+  }, [testCloud]);
+  /* Al abrir el CRM verifica la conexión y la re-verifica cada minuto */
+  useEffect(() => {
+    void testCloudNow();
+    const iv = setInterval(() => void testCloudNow(), 60 * 1000);
+    return () => clearInterval(iv);
+  }, [testCloudNow]);
   const syncToCloud = useCallback(async (onTabla?: (t: string, s: "busy" | "ok" | "err", f?: number) => void) => {
     const client = await clienteSb();
     if (!client) { setSyncInfo({ last: Date.now(), ok: false, msg: "Configura la URL y la anon key de Supabase en Integraciones" }); return false; }
@@ -248,7 +289,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       const { subirTodo } = await import("./supabase");
       const { fallos } = await subirTodo(client, dbRef.current, onTabla);
       if (fallos.length === 0) {
-        setSyncInfo({ last: Date.now(), ok: true, msg: "Base de datos subida a Supabase (14 tablas)" });
+        setSyncInfo({ last: Date.now(), ok: true, msg: "Base de datos subida a Supabase (18 tablas)" });
+        void testCloudNow();
         return true;
       }
       const esquemaViejo = fallos.some((f) => /column|schema/i.test(f.error));
@@ -387,7 +429,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     saveSesion, deleteSesion, saveEvento, deleteEvento,
     saveUsuario, deleteUsuario, setConfig, deleteTasaHistorial, clearTasaHistorial,
     savePaqueteEscuela, deletePaqueteEscuela,
+    logFactura, logTarjeta, logEscaneo, logProduccion,
     exportBackup, importBackup, testCloud, syncToCloud, restoreFromCloud, syncInfo, syncing, rtEstado,
+    cloudStatus, testCloudNow,
     alerts,
   };
   return <AppCtx.Provider value={value}>{children}</AppCtx.Provider>;

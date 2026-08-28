@@ -49,10 +49,18 @@ export interface Config {
 }
 export interface CatAdicional { nombre: string; precio: number; talla: "" | "letras" | "numerica"; }
 export interface OcrDraft { ci: string; nombres: string; apellidos: string; fecha: string; raw?: string; }
+
+/* ---- Registros por módulo (una tabla por módulo en Supabase) ---- */
+export interface FacturaLog { id: string; numero: string; estudianteId: string; estudiante: string; fecha: string; total: number; accion: string; }
+export interface TarjetaLog { id: string; fecha: string; estudianteId: string; estudiante: string; accion: string; lote: string; }
+export interface EscaneoLog { id: string; fecha: string; motor: string; ok: boolean; nombres: string; apellidos: string; ci: string; }
+export interface ProduccionLog { id: string; fecha: string; detalle: string; materiales: number; pedidos: number; }
+
 export interface CRMData {
   escuelas: Escuela[]; docentes: Docente[]; estudiantes: Estudiante[]; cotizaciones: Cotizacion[];
   sesiones: Sesion[]; eventos: Evento[]; mensajes: MensajeLog[]; usuarios: Usuario[];
   historialTasas: HistorialTasa[]; paquetesEscuelas: PaqueteEscuela[]; config: Config;
+  facturas: FacturaLog[]; tarjetas: TarjetaLog[]; escaneos: EscaneoLog[]; produccionLogs: ProduccionLog[];
   currentUserId: string; seqPedido: number; seqCot: number;
 }
 
@@ -326,6 +334,8 @@ export const DB_TABLES = [
   { tabla: "eventos", label: "Agenda" }, { tabla: "mensajes", label: "Mensajes" },
   { tabla: "usuarios", label: "Usuarios" }, { tabla: "historial_tasas", label: "Historial de tasas" },
   { tabla: "paquetes_escuelas", label: "Paquetes por escuela" }, { tabla: "configuracion", label: "Configuración" },
+  { tabla: "facturas", label: "Facturación" }, { tabla: "tarjetas_qr", label: "Tarjetas QR" },
+  { tabla: "escaneos_ocr", label: "Escáner Inteligente" }, { tabla: "registros_produccion", label: "Producción" },
 ];
 export const SUPABASE_SQL = `-- Esquema CRM Promociones JyG · una tabla por módulo
 create table if not exists escuelas (
@@ -407,6 +417,31 @@ create policy "crm_all" on historial_tasas for all using (true) with check (true
 create policy "crm_all" on paquetes_escuelas for all using (true) with check (true);
 create policy "crm_all" on configuracion for all using (true) with check (true);
 
+-- Tablas de registro por módulo (18 en total)
+create table if not exists facturas (
+  id text primary key, numero text default '', estudiante_id text default '', estudiante text default '',
+  fecha text default '', total numeric(12,2) default 0, accion text default ''
+);
+create table if not exists tarjetas_qr (
+  id text primary key, fecha text default '', estudiante_id text default '', estudiante text default '',
+  accion text default '', lote text default ''
+);
+create table if not exists escaneos_ocr (
+  id text primary key, fecha text default '', motor text default '', ok boolean default false,
+  nombres text default '', apellidos text default '', ci text default ''
+);
+create table if not exists registros_produccion (
+  id text primary key, fecha text default '', detalle text default '', materiales int default 0, pedidos int default 0
+);
+alter table facturas enable row level security;
+alter table tarjetas_qr enable row level security;
+alter table escaneos_ocr enable row level security;
+alter table registros_produccion enable row level security;
+create policy "crm_all" on facturas for all using (true) with check (true);
+create policy "crm_all" on tarjetas_qr for all using (true) with check (true);
+create policy "crm_all" on escaneos_ocr for all using (true) with check (true);
+create policy "crm_all" on registros_produccion for all using (true) with check (true);
+
 -- ═══════════════════════════════════════════════════════════
 -- TIEMPO REAL: permite que el CRM lea los cambios al instante.
 -- Ejecuta cada línea por separado (si una ya existe, ignora el error y sigue).
@@ -424,7 +459,11 @@ alter publication supabase_realtime add table mensajes;
 alter publication supabase_realtime add table usuarios;
 alter publication supabase_realtime add table historial_tasas;
 alter publication supabase_realtime add table paquetes_escuelas;
-alter publication supabase_realtime add table configuracion;`;
+alter publication supabase_realtime add table configuracion;
+alter publication supabase_realtime add table facturas;
+alter publication supabase_realtime add table tarjetas_qr;
+alter publication supabase_realtime add table escaneos_ocr;
+alter publication supabase_realtime add table registros_produccion;`;
 
 /* ============================================================
    MIGRACIONES — para proyectos cuyas tablas se crearon con un
@@ -489,6 +528,35 @@ drop policy if exists "crm_all" on cotizacion_items;
 create policy "crm_all" on adicionales_items for all using (true) with check (true);
 create policy "crm_all" on cotizacion_items for all using (true) with check (true);
 
+-- Tablas de registro por módulo (se crean solo si faltan):
+create table if not exists facturas (
+  id text primary key, numero text default '', estudiante_id text default '', estudiante text default '',
+  fecha text default '', total numeric(12,2) default 0, accion text default ''
+);
+create table if not exists tarjetas_qr (
+  id text primary key, fecha text default '', estudiante_id text default '', estudiante text default '',
+  accion text default '', lote text default ''
+);
+create table if not exists escaneos_ocr (
+  id text primary key, fecha text default '', motor text default '', ok boolean default false,
+  nombres text default '', apellidos text default '', ci text default ''
+);
+create table if not exists registros_produccion (
+  id text primary key, fecha text default '', detalle text default '', materiales int default 0, pedidos int default 0
+);
+alter table facturas enable row level security;
+alter table tarjetas_qr enable row level security;
+alter table escaneos_ocr enable row level security;
+alter table registros_produccion enable row level security;
+drop policy if exists "crm_all" on facturas;
+drop policy if exists "crm_all" on tarjetas_qr;
+drop policy if exists "crm_all" on escaneos_ocr;
+drop policy if exists "crm_all" on registros_produccion;
+create policy "crm_all" on facturas for all using (true) with check (true);
+create policy "crm_all" on tarjetas_qr for all using (true) with check (true);
+create policy "crm_all" on escaneos_ocr for all using (true) with check (true);
+create policy "crm_all" on registros_produccion for all using (true) with check (true);
+
 -- Tiempo real (ejecutar el bloque; ignorar las líneas que digan "ya existe"):
 alter publication supabase_realtime add table escuelas;
 alter publication supabase_realtime add table docentes;
@@ -503,7 +571,11 @@ alter publication supabase_realtime add table mensajes;
 alter publication supabase_realtime add table usuarios;
 alter publication supabase_realtime add table historial_tasas;
 alter publication supabase_realtime add table paquetes_escuelas;
-alter publication supabase_realtime add table configuracion;`;
+alter publication supabase_realtime add table configuracion;
+alter publication supabase_realtime add table facturas;
+alter publication supabase_realtime add table tarjetas_qr;
+alter publication supabase_realtime add table escaneos_ocr;
+alter publication supabase_realtime add table registros_produccion;`;
 
 /* ============================================================
    SEMILLAS

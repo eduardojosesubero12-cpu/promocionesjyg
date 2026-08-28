@@ -798,7 +798,7 @@ export function Configuracion() {
    INTEGRACIONES — Supabase + historial de tasas
    ============================================================ */
 export function Integraciones() {
-  const { db, setConfig, confirm, success, toast, testCloud, syncToCloud, restoreFromCloud, syncInfo, syncing, rtEstado, deleteTasaHistorial, clearTasaHistorial } = useApp();
+  const { db, setConfig, confirm, success, toast, testCloud, syncToCloud, restoreFromCloud, syncInfo, syncing, rtEstado, cloudStatus, testCloudNow, deleteTasaHistorial, clearTasaHistorial } = useApp();
   const [sbUrl, setSbUrl] = useState(db.config.supabaseUrl);
   const [sbKey, setSbKey] = useState(db.config.supabaseKey);
   const [verKey, setVerKey] = useState(false);
@@ -827,7 +827,7 @@ export function Integraciones() {
     } catch (e: any) { setTest("fail"); toast(e?.message || "No se pudo conectar", "err"); }
   };
   const subir = async () => {
-    const ok = await confirm({ title: "¿Subir la base completa a Supabase?", message: "Las 14 tablas del CRM reemplazarán los datos actuales en la nube.", confirmText: "Sí, Subir" });
+    const ok = await confirm({ title: "¿Subir la base completa a Supabase?", message: "Las 18 tablas del CRM reemplazarán los datos actuales en la nube.", confirmText: "Sí, Subir" });
     if (!ok) return;
     await syncToCloud((t, s) => setTabEstado((v) => ({ ...v, [t]: s })));
   };
@@ -855,6 +855,15 @@ export function Integraciones() {
           <p style={{ fontSize: 13.5, margin: "4px 0 0", color: "var(--ink-soft)" }}>Base de datos en Supabase, historial de la tasa del día y APIs conectadas</p>
         </div>
         <div className="d-flex align-items-center gap-2 flex-wrap">
+          <button
+            className="border-0 bg-transparent p-0"
+            title={cloudStatus?.ok ? `Conectado · ${cloudStatus.tablas} tablas · ${cloudStatus.filas} filas · verificado ${fmtHaceSegundos(cloudStatus.last, now)}` : "Re-verificar conexión"}
+            onClick={() => void testCloudNow()}
+          >
+            <Badge tone={cloudStatus?.ok ? "green" : cloudStatus ? "red" : "slate"} dot>
+              Supabase: {cloudStatus?.ok ? `Conectado · ${cloudStatus.tablas} tablas` : cloudStatus ? "Sin conexión" : "Verificando…"}
+            </Badge>
+          </button>
           <Badge tone={rtEstado === "on" ? "green" : rtEstado === "error" ? "red" : "slate"} dot>
             Tiempo real: {rtEstado === "on" ? "Conectado" : rtEstado === "error" ? "Sin conexión" : "Inactivo"}
           </Badge>
@@ -925,7 +934,7 @@ export function Integraciones() {
         {/* Paso 2: esquema */}
         <div className="col-12 col-xl-6">
           <div className="card p-3 p-md-4 h-100" style={{ borderLeft: "4px solid var(--jyg-gold)" }}>
-            <SectionHead title="2 · Crear el esquema SQL" desc="Una tabla por módulo (14 en total) — SQL Editor en Supabase" actions={
+            <SectionHead title="2 · Crear el esquema SQL" desc="Una tabla por módulo (18 en total) — SQL Editor en Supabase" actions={
               <button className="btn btn-soft btn-xs" onClick={() => setVerSql(!verSql)}>{verSql ? "Ocultar SQL" : "Ver SQL"}</button>
             } />
             {verSql ? (

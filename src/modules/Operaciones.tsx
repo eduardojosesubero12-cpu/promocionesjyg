@@ -487,7 +487,7 @@ export function TarjetaQR({ est, escuelaNombre, tasaHoy }: { est: Estudiante; es
 }
 
 export function EtiquetasQRPage() {
-  const { db, tasa, toast } = useApp();
+  const { db, tasa, toast, logTarjeta } = useApp();
   const [q, setQ] = useState("");
   const [fEscuela, setFEscuela] = useState("");
   const [grupo, setGrupo] = useState<"escuela" | "grado" | "ninguno">("escuela");
@@ -516,6 +516,10 @@ export function EtiquetasQRPage() {
   const imprimir = (ids: string[] | null) => {
     if (!ids || ids.length === 0) { toast("No hay tarjetas para imprimir", "warn"); return; }
     setPrintIds(ids);
+    const lote = `LOTE-${todayISO()}`;
+    db.estudiantes.filter((e) => ids.includes(e.id)).forEach((e) =>
+      logTarjeta({ estudianteId: e.id, estudiante: e.nombre, accion: ids.length > 1 ? "Impresión por lote" : "Impresión individual", lote })
+    );
     setTimeout(() => window.print(), 90);
     setTimeout(() => setPrintIds(null), 1400);
   };
@@ -895,7 +899,7 @@ export function OcrPage() {
    FACTURACIÓN — ticket térmico + captura + portal HTML
    ============================================================ */
 export function Facturas() {
-  const { db, tasa, toast } = useApp();
+  const { db, tasa, toast, logFactura } = useApp();
   const [q, setQ] = useState("");
   const [fEscuela, setFEscuela] = useState("");
   const [selId, setSelId] = useState<string | null>(null);
@@ -916,6 +920,7 @@ export function Facturas() {
   const imprimir = () => {
     if (!sel) return;
     setPrintEst(sel);
+    logFactura({ numero: `F-${sel.pedido.replace("P-", "")}`, estudianteId: sel.id, estudiante: sel.nombre, total: estudianteTotales(sel).total, accion: "Impresión de ticket" });
     setTimeout(() => window.print(), 90);
     setTimeout(() => setPrintEst(null), 1400);
   };
@@ -938,6 +943,7 @@ export function Facturas() {
     const a = document.createElement("a");
     a.href = url; a.download = `ticket-${sel.pedido}-${todayISO()}.jpg`; a.click();
     setTimeout(() => URL.revokeObjectURL(url), 4000);
+    logFactura({ numero: `F-${sel.pedido.replace("P-", "")}`, estudianteId: sel.id, estudiante: sel.nombre, total: estudianteTotales(sel).total, accion: "Descarga de captura JPG" });
     toast("Captura descargada como JPG", "ok");
   };
   const enviarWhatsApp = async () => {
@@ -963,6 +969,7 @@ export function Facturas() {
       toast("Captura descargada — adjúntala en el chat abierto", "ok");
     }
     setEnviados((v) => ({ ...v, [sel.id]: Date.now() }));
+    logFactura({ numero: `F-${sel.pedido.replace("P-", "")}`, estudianteId: sel.id, estudiante: sel.nombre, total: estudianteTotales(sel).total, accion: "Envío por WhatsApp" });
   };
   const descargarPortal = () => {
     if (!sel) return;
