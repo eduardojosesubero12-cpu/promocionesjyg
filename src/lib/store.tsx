@@ -246,9 +246,19 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setSyncing(true);
     try {
       const { subirTodo } = await import("./supabase");
-      await subirTodo(client, dbRef.current, onTabla);
-      setSyncInfo({ last: Date.now(), ok: true, msg: "Base de datos subida a Supabase (14 tablas)" });
-      return true;
+      const { fallos } = await subirTodo(client, dbRef.current, onTabla);
+      if (fallos.length === 0) {
+        setSyncInfo({ last: Date.now(), ok: true, msg: "Base de datos subida a Supabase (14 tablas)" });
+        return true;
+      }
+      const esquemaViejo = fallos.some((f) => /column|schema/i.test(f.error));
+      setSyncInfo({
+        last: Date.now(), ok: false,
+        msg: esquemaViejo
+          ? `Tu Supabase tiene un esquema antiguo (falló: ${fallos.map((f) => f.tabla).join(", ")}). Ejecuta el SQL de migración en Integraciones.`
+          : `Subida parcial — fallaron: ${fallos.map((f) => f.tabla).join(", ")}`,
+      });
+      return false;
     } catch (e: any) {
       setSyncInfo({ last: Date.now(), ok: false, msg: "Error al subir: " + (e?.message || "desconocido") });
       return false;

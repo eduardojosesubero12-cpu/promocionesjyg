@@ -427,6 +427,85 @@ alter publication supabase_realtime add table paquetes_escuelas;
 alter publication supabase_realtime add table configuracion;`;
 
 /* ============================================================
+   MIGRACIONES — para proyectos cuyas tablas se crearon con un
+   esquema anterior (ej. falta la columna "extra" en estudiantes).
+   Seguras de ejecutar varias veces: no tocan datos existentes.
+   ============================================================ */
+export const MIGRACIONES_SQL = `-- MIGRACIÓN CRM JyG — agrega columnas nuevas SIN borrar datos.
+-- Ejecutar TODO el bloque en SQL Editor (es seguro repetirlo).
+
+alter table estudiantes add column if not exists extra jsonb default '{}'::jsonb;
+alter table estudiantes add column if not exists codigos jsonb default '{}'::jsonb;
+alter table estudiantes add column if not exists fecha_entrega text default '';
+alter table estudiantes add column if not exists observaciones text default '';
+alter table estudiantes add column if not exists representante text default '';
+alter table estudiantes add column if not exists ci text default '';
+alter table estudiantes add column if not exists precio_paquete numeric(12,2) default 0;
+
+alter table escuelas add column if not exists anio_escolar text default '';
+alter table escuelas add column if not exists observaciones text default '';
+
+alter table docentes add column if not exists correo text default '';
+alter table docentes add column if not exists observaciones text default '';
+
+alter table pagos add column if not exists bs boolean default false;
+alter table pagos add column if not exists tasa numeric(12,2) default 0;
+alter table pagos add column if not exists usd numeric(12,2) default 0;
+alter table pagos add column if not exists referencia text default '';
+alter table pagos add column if not exists observacion text default '';
+
+alter table sesiones add column if not exists fotos int default 0;
+alter table sesiones add column if not exists nota text default '';
+
+alter table historial_tasas add column if not exists euro numeric(12,4) default 0;
+alter table historial_tasas add column if not exists paralelo numeric(12,4) default 0;
+alter table historial_tasas add column if not exists fuente text default 'dolarapi';
+alter table historial_tasas add column if not exists actualizado bigint default 0;
+
+alter table paquetes_escuelas add column if not exists articulos jsonb default '[]'::jsonb;
+alter table paquetes_escuelas add column if not exists activo boolean default true;
+alter table paquetes_escuelas add column if not exists creado text default '';
+
+alter table configuracion add column if not exists data jsonb default '{}'::jsonb;
+alter table configuracion add column if not exists seq_pedido int default 1;
+alter table configuracion add column if not exists seq_cot int default 1;
+alter table configuracion add column if not exists current_user_id text default '';
+
+-- Si alguna tabla no existe, créala (no afecta a las existentes):
+create table if not exists adicionales_items (
+  id text primary key, estudiante_id text references estudiantes(id) on delete cascade,
+  producto text default '', cantidad int default 1, precio numeric(12,2) default 0, talla text default ''
+);
+create table if not exists cotizacion_items (
+  id text primary key, cotizacion_id text references cotizaciones(id) on delete cascade,
+  producto text default '', cantidad int default 1, precio numeric(12,2) default 0, talla text default ''
+);
+
+-- Habilitar RLS y políticas si faltan:
+alter table adicionales_items enable row level security;
+alter table cotizacion_items enable row level security;
+drop policy if exists "crm_all" on adicionales_items;
+drop policy if exists "crm_all" on cotizacion_items;
+create policy "crm_all" on adicionales_items for all using (true) with check (true);
+create policy "crm_all" on cotizacion_items for all using (true) with check (true);
+
+-- Tiempo real (ejecutar el bloque; ignorar las líneas que digan "ya existe"):
+alter publication supabase_realtime add table escuelas;
+alter publication supabase_realtime add table docentes;
+alter publication supabase_realtime add table estudiantes;
+alter publication supabase_realtime add table pagos;
+alter publication supabase_realtime add table adicionales_items;
+alter publication supabase_realtime add table cotizaciones;
+alter publication supabase_realtime add table cotizacion_items;
+alter publication supabase_realtime add table sesiones;
+alter publication supabase_realtime add table eventos;
+alter publication supabase_realtime add table mensajes;
+alter publication supabase_realtime add table usuarios;
+alter publication supabase_realtime add table historial_tasas;
+alter publication supabase_realtime add table paquetes_escuelas;
+alter publication supabase_realtime add table configuracion;`;
+
+/* ============================================================
    SEMILLAS
    ============================================================ */
 export const SEED_ESCUELAS: Escuela[] = [

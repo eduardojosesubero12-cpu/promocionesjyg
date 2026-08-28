@@ -75,8 +75,13 @@ export async function probarConexion(client: SupabaseClient): Promise<{ tablas: 
 }
 
 const ORDEN = ["escuelas", "docentes", "estudiantes", "pagos", "adicionales_items", "cotizaciones", "cotizacion_items", "sesiones", "eventos", "mensajes", "usuarios", "historial_tasas", "paquetes_escuelas", "configuracion"];
-export async function subirTodo(client: SupabaseClient, db: CRMData, onTabla?: (t: string, s: "busy" | "ok" | "err", f?: number) => void): Promise<void> {
+
+/* Sube todas las tablas. Es tolerante: si una tabla falla (p. ej. le falta
+   una columna por un esquema antiguo), continúa con el resto y devuelve la
+   lista de fallos para que el usuario ejecute la migración SQL. */
+export async function subirTodo(client: SupabaseClient, db: CRMData, onTabla?: (t: string, s: "busy" | "ok" | "err", f?: number) => void): Promise<{ fallos: { tabla: string; error: string }[] }> {
   const rows = dbToRows(db);
+  const fallos: { tabla: string; error: string }[] = [];
   for (const tabla of ORDEN) {
     onTabla?.(tabla, "busy");
     try {
@@ -88,8 +93,12 @@ export async function subirTodo(client: SupabaseClient, db: CRMData, onTabla?: (
         if (ins.error) throw new Error(ins.error.message);
       }
       onTabla?.(tabla, "ok", data.length);
-    } catch (e: any) { onTabla?.(tabla, "err"); throw new Error(`${tabla}: ${e.message}`); }
+    } catch (e: any) {
+      onTabla?.(tabla, "err");
+      fallos.push({ tabla, error: e?.message || "desconocido" });
+    }
   }
+  return { fallos };
 }
 
 export async function descargarTodo(client: SupabaseClient): Promise<Record<string, any[]>> {

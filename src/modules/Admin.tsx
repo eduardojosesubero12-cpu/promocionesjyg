@@ -6,7 +6,7 @@ import {
 import { useApp } from "../lib/store";
 import type { CatAdicional, PaqueteEscuela, Rol, Usuario } from "../lib/data";
 import {
-  ACCESOS_DEFAULT, API_DOLARES, API_EUROS, DB_TABLES, MODULOS_GRUPOS, OPENROUTER_MODELOS, ORDEN_MATERIALES,
+  ACCESOS_DEFAULT, API_DOLARES, API_EUROS, DB_TABLES, MIGRACIONES_SQL, MODULOS_GRUPOS, OPENROUTER_MODELOS, ORDEN_MATERIALES,
   PAQUETES, ROL_DESC, ROL_LABEL, ROLES_INFO, SUPABASE_SQL, TODOS_MODULOS,
   computeProduccion, downloadFile, estudianteTotales, fmtBs, fmtFecha, fmtFechaHoraViva, fmtHaceSegundos,
   fmtUSD, getAdicionales, getGrados, getSecciones, getTallas, toCSV, todayISO, uid,
@@ -805,6 +805,7 @@ export function Integraciones() {
   const [test, setTest] = useState<"idle" | "busy" | "ok" | "fail">("idle");
   const [testInfo, setTestInfo] = useState<{ tablas: number; filas: number } | null>(null);
   const [verSql, setVerSql] = useState(false);
+  const [verMig, setVerMig] = useState(false);
   const [tabEstado, setTabEstado] = useState<Record<string, "busy" | "ok" | "err">>({});
   const [autoSync, setAutoSync] = useState(db.config.autoSyncCloud);
   const now = useNow(1000);
@@ -945,6 +946,31 @@ export function Integraciones() {
                     </div>
                   </div>
                 ))}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Migración — para esquemas antiguos (columnas faltantes) */}
+        <div className="col-12">
+          <div className="card p-3 p-md-4" style={{ borderLeft: "4px solid var(--warn)" }}>
+            <SectionHead
+              title="¿Error de columna al subir? · Ejecuta la migración"
+              desc="Si tu Supabase se creó con un esquema anterior (ej. falta la columna 'extra' en estudiantes), este SQL agrega las columnas nuevas sin borrar datos"
+              actions={<button className="btn btn-soft btn-xs" onClick={() => setVerMig(!verMig)}>{verMig ? "Ocultar SQL" : "Ver SQL de migración"}</button>}
+            />
+            {verMig ? (
+              <div className="position-relative">
+                <pre className="p-3 rounded-3 overflow-auto" style={{ background: "#0d1524", color: "#a8c6e8", fontSize: 10.5, maxHeight: 240, fontFamily: "ui-monospace, Menlo, monospace" }}>{MIGRACIONES_SQL}</pre>
+                <button className="btn btn-gold btn-xs position-absolute" style={{ top: 10, right: 10 }} onClick={() => { navigator.clipboard?.writeText(MIGRACIONES_SQL).then(() => toast("SQL de migración copiado", "ok")).catch(() => undefined); }}><Copy size={11} /> Copiar</button>
+              </div>
+            ) : (
+              <div className="d-flex align-items-start gap-2 flex-wrap" style={{ fontSize: 12.5, color: "var(--ink-soft)" }}>
+                <span className="d-flex align-items-center justify-content-center rounded-3 flex-shrink-0" style={{ width: 34, height: 34, background: "var(--tint-warn)", color: "var(--warn)" }}><i className="bi bi-tools" /></span>
+                <span style={{ flex: 1, minWidth: 220 }}>
+                  Abre <b>Supabase → SQL Editor</b>, pulsa <b>Ver SQL de migración → Copiar</b>, pega y ejecuta.
+                  Es seguro repetirlo: solo agrega columnas que faltan, nunca toca tus datos.
+                </span>
               </div>
             )}
           </div>
