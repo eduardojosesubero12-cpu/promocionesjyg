@@ -405,7 +405,26 @@ create policy "crm_all" on mensajes for all using (true) with check (true);
 create policy "crm_all" on usuarios for all using (true) with check (true);
 create policy "crm_all" on historial_tasas for all using (true) with check (true);
 create policy "crm_all" on paquetes_escuelas for all using (true) with check (true);
-create policy "crm_all" on configuracion for all using (true) with check (true);`;
+create policy "crm_all" on configuracion for all using (true) with check (true);
+
+-- ═══════════════════════════════════════════════════════════
+-- TIEMPO REAL: permite que el CRM lea los cambios al instante.
+-- Ejecuta cada línea por separado (si una ya existe, ignora el error y sigue).
+-- ═══════════════════════════════════════════════════════════
+alter publication supabase_realtime add table escuelas;
+alter publication supabase_realtime add table docentes;
+alter publication supabase_realtime add table estudiantes;
+alter publication supabase_realtime add table pagos;
+alter publication supabase_realtime add table adicionales_items;
+alter publication supabase_realtime add table cotizaciones;
+alter publication supabase_realtime add table cotizacion_items;
+alter publication supabase_realtime add table sesiones;
+alter publication supabase_realtime add table eventos;
+alter publication supabase_realtime add table mensajes;
+alter publication supabase_realtime add table usuarios;
+alter publication supabase_realtime add table historial_tasas;
+alter publication supabase_realtime add table paquetes_escuelas;
+alter publication supabase_realtime add table configuracion;`;
 
 /* ============================================================
    SEMILLAS
@@ -470,7 +489,11 @@ export const SEED_CONFIG: Config = {
   empresa: { nombre: "Promociones JyG", rif: "J-40123456-7", direccion: "Av. Bolívar, Centro Comercial Plaza, Local 12, Valencia", telefono: "0414-555.00.00" },
   preciosPaquetes: [20, 22, 28, 30, 35, 40, 45, 48, 55, 60, 80, 110, 145],
   usarApi: true, usarTasaManual: false, tasaFallback: 352.4, tasaManualUSD: 352.4, tasaManualEUR: 384.1,
-  historialAuto: true, supabaseUrl: "", supabaseKey: "", autoSyncCloud: false,
+  historialAuto: true,
+  /* Conexión Supabase del equipo JyG (clave pública de publicación — segura en el cliente) */
+  supabaseUrl: "https://vvbvfvdjlmyujbpeorpn.supabase.co",
+  supabaseKey: "sb_publishable_n__jpo0Rdx5q9a-MY6NqrQ_SKyp4NCN",
+  autoSyncCloud: true,
   /* La API key se configura desde Configuración y se guarda en Supabase (nunca en el código) */
   openRouterKey: "", openRouterModel: OPENROUTER_MODELOS[0].id,
 };

@@ -25,7 +25,11 @@ const loadDB = (): DB => {
     if (!raw) return seedDB();
     const d = JSON.parse(raw);
     const base = seedDB();
-    return { ...base, ...d, config: { ...base.config, ...(d.config || {}) } };
+    const cfg = { ...base.config, ...(d.config || {}) };
+    /* Garantiza la conexión Supabase aunque el navegador tuviera credenciales vacías guardadas */
+    if (!cfg.supabaseUrl) cfg.supabaseUrl = base.config.supabaseUrl;
+    if (!cfg.supabaseKey) cfg.supabaseKey = base.config.supabaseKey;
+    return { ...base, ...d, config: cfg };
   } catch { return seedDB(); }
 };
 
@@ -62,6 +66,7 @@ interface Ctx {
   syncToCloud: (onTabla?: (t: string, s: "busy" | "ok" | "err", f?: number) => void) => Promise<boolean>;
   restoreFromCloud: () => Promise<boolean>;
   syncInfo: { last: number; ok: boolean; msg: string } | null; syncing: boolean;
+  rtEstado: "off" | "on" | "error";
   alerts: { key: string; title: string; desc: string; route: Route }[];
 }
 
@@ -96,6 +101,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const confirmResolve = useRef<((v: boolean) => void) | null>(null);
   const dbRef = useRef(db);
   dbRef.current = db;
+  /* Control de sincronización con la nube */
+  const cloudReady = useRef(false);      /* se activa tras la carga inicial */
+  const applyingRemote = useRef(false);  /* evita bucles: no re-subir lo que llegó de la nube */
+  const rtTimer = useRef<any>(null);     /* debounce de eventos de tiempo real */
+  const [rtEstado, setRtEstado] = useState<"off" | "on" | "error">("off");
 
   /* Persistencia */
   useEffect(() => {
@@ -121,8 +131,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => { void refreshTasa(); }, [refreshTasa]);
   useEffect(() => { const iv = setInterval(() => void refreshTasa(), 5 * 60 * 1000); return () => clearInterval(iv); }, [refreshTasa]);
 
-  /* Auto-sincronización con Supabase */
+  /* Auto-sincronización con Supabase (cada cambio local, con debounce).
+     No se ejecuta durante la carga inicial ni al aplicar datos que llegaron de la nube. */
   useEffect(() => {
+    if (!cloudReady.current || applyingRemote.current) return;
     if (!db.config.autoSyncCloud || !db.config.supabaseUrl || !db.config.supabaseKey) return;
     const t = setTimeout(() => { void syncToCloud(); }, 2500);
     return () => clearTimeout(t);
@@ -242,6 +254,15 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       return false;
     } finally { setSyncing(false); }
   }, [clienteSb]);
+  /* Mezcla los datos de la nube con la configuración local (preserva credenciales de conexión) */
+  const aplicarNube = useCallback((nuevo: DB) => {
+    setDb((d) => ({
+      ...nuevo,
+      config: { ...nuevo.config, supabaseUrl: d.config.supabaseUrl, supabaseKey: d.config.supabaseKey, autoSyncCloud: d.config.autoSyncCloud },
+      currentUserId: d.currentUserId,
+    }));
+  }, []);
+
   const restoreFromCloud = useCallback(async () => {
     const client = await clienteSb();
     if (!client) { setSyncInfo({ last: Date.now(), ok: false, msg: "Configura la URL y la anon key de Supabase" }); return false; }
@@ -250,14 +271,77 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       const { descargarTodo, rowsToDb } = await import("./supabase");
       const rows = await descargarTodo(client);
       const nuevo = rowsToDb(rows, dbRef.current);
-      setDb({ ...seedDB(), ...nuevo });
+      aplicarNube(nuevo);
       setSyncInfo({ last: Date.now(), ok: true, msg: "Base de datos restaurada desde Supabase" });
       return true;
     } catch (e: any) {
       setSyncInfo({ last: Date.now(), ok: false, msg: "Error al restaurar: " + (e?.message || "desconocido") });
       return false;
     } finally { setSyncing(false); }
-  }, [clienteSb]);
+  }, [clienteSb, aplicarNube]);
+
+  /* ── Carga inicial: si la nube tiene datos, ganan; si está vacía, se sube la base local ── */
+  useEffect(() => {
+    let cancelado = false;
+    (async () => {
+      const cfg = dbRef.current.config;
+      if (cfg.supabaseUrl && cfg.supabaseKey) {
+        try {
+          const client = await clienteSb();
+          if (client) {
+            const { descargarTodo, rowsToDb } = await import("./supabase");
+            const rows = await descargarTodo(client);
+            if (!cancelado) {
+              applyingRemote.current = true;
+              aplicarNube(rowsToDb(rows, dbRef.current));
+              setSyncInfo({ last: Date.now(), ok: true, msg: "Datos leídos de Supabase al iniciar" });
+              setTimeout(() => { applyingRemote.current = false; }, 800);
+            }
+          }
+        } catch {
+          /* Nube vacía o sin tablas → publicar la base local por primera vez */
+          if (!cancelado) await syncToCloud();
+        }
+      }
+      if (!cancelado) cloudReady.current = true;
+    })();
+    return () => { cancelado = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  /* ── Tiempo real: los cambios hechos en otro dispositivo se reflejan al instante ── */
+  useEffect(() => {
+    let channel: any = null;
+    (async () => {
+      const cfg = dbRef.current.config;
+      if (!cfg.supabaseUrl || !cfg.supabaseKey) return;
+      try {
+        const { sbClient } = await import("./supabase");
+        const client = sbClient(cfg.supabaseUrl, cfg.supabaseKey);
+        channel = client.channel("jyg-tiempo-real");
+        channel.on("postgres_changes", { event: "*", schema: "public" }, () => {
+          if (applyingRemote.current) return;
+          clearTimeout(rtTimer.current);
+          rtTimer.current = setTimeout(async () => {
+            try {
+              const { descargarTodo, rowsToDb } = await import("./supabase");
+              const rows = await descargarTodo(client);
+              applyingRemote.current = true;
+              aplicarNube(rowsToDb(rows, dbRef.current));
+              setSyncInfo({ last: Date.now(), ok: true, msg: "Actualizado en tiempo real desde Supabase" });
+              setTimeout(() => { applyingRemote.current = false; }, 800);
+            } catch { /* noop */ }
+          }, 900);
+        });
+        channel.subscribe((status: string) => {
+          if (status === "SUBSCRIBED") setRtEstado("on");
+          if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") setRtEstado("error");
+        });
+      } catch { setRtEstado("error"); }
+    })();
+    return () => { clearTimeout(rtTimer.current); try { channel?.unsubscribe(); } catch { /* noop */ } };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const user = useMemo(() => db.usuarios.find((u) => u.id === db.currentUserId) || db.usuarios[0], [db.usuarios, db.currentUserId]);
   const setCurrentUser = useCallback((id: string) => setDb((d) => ({ ...d, currentUserId: id })), []);
@@ -293,7 +377,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     saveSesion, deleteSesion, saveEvento, deleteEvento,
     saveUsuario, deleteUsuario, setConfig, deleteTasaHistorial, clearTasaHistorial,
     savePaqueteEscuela, deletePaqueteEscuela,
-    exportBackup, importBackup, testCloud, syncToCloud, restoreFromCloud, syncInfo, syncing,
+    exportBackup, importBackup, testCloud, syncToCloud, restoreFromCloud, syncInfo, syncing, rtEstado,
     alerts,
   };
   return <AppCtx.Provider value={value}>{children}</AppCtx.Provider>;

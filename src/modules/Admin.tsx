@@ -798,7 +798,7 @@ export function Configuracion() {
    INTEGRACIONES — Supabase + historial de tasas
    ============================================================ */
 export function Integraciones() {
-  const { db, setConfig, confirm, success, toast, testCloud, syncToCloud, restoreFromCloud, syncInfo, syncing, deleteTasaHistorial, clearTasaHistorial } = useApp();
+  const { db, setConfig, confirm, success, toast, testCloud, syncToCloud, restoreFromCloud, syncInfo, syncing, rtEstado, deleteTasaHistorial, clearTasaHistorial } = useApp();
   const [sbUrl, setSbUrl] = useState(db.config.supabaseUrl);
   const [sbKey, setSbKey] = useState(db.config.supabaseKey);
   const [verKey, setVerKey] = useState(false);
@@ -853,11 +853,16 @@ export function Integraciones() {
           <h1>Integraciones</h1>
           <p style={{ fontSize: 13.5, margin: "4px 0 0", color: "var(--ink-soft)" }}>Base de datos en Supabase, historial de la tasa del día y APIs conectadas</p>
         </div>
-        {syncInfo && (
-          <Badge tone={syncInfo.ok ? "green" : "red"} dot>
-            {syncInfo.msg} · {fmtHaceSegundos(syncInfo.last, now)}
+        <div className="d-flex align-items-center gap-2 flex-wrap">
+          <Badge tone={rtEstado === "on" ? "green" : rtEstado === "error" ? "red" : "slate"} dot>
+            Tiempo real: {rtEstado === "on" ? "Conectado" : rtEstado === "error" ? "Sin conexión" : "Inactivo"}
           </Badge>
-        )}
+          {syncInfo && (
+            <Badge tone={syncInfo.ok ? "green" : "red"} dot>
+              {syncInfo.msg} · {fmtHaceSegundos(syncInfo.last, now)}
+            </Badge>
+          )}
+        </div>
       </div>
 
       {/* Barra de progreso de pasos */}
@@ -881,8 +886,8 @@ export function Integraciones() {
         {/* Paso 1: conexión */}
         <div className="col-12 col-xl-6">
           <div className="card p-3 p-md-4 h-100" style={{ borderLeft: "4px solid var(--jyg-navy)" }}>
-            <SectionHead title="1 · Conectar el proyecto Supabase" desc="URL del proyecto y anon key — Settings → API en Supabase" actions={
-              <Badge tone={paso1 ? "green" : "slate"} dot>{paso1 ? "Credenciales listas" : "Sin configurar"}</Badge>
+            <SectionHead title="1 · Proyecto Supabase del equipo JyG" desc="Ya conectado — cada cambio se sube solo y se lee en tiempo real" actions={
+              <Badge tone={paso1 ? "green" : "slate"} dot>{paso1 ? "Conectado y automático" : "Sin configurar"}</Badge>
             } />
             <Field label="URL del proyecto">
               <input className="input" style={{ fontFamily: "ui-monospace, monospace", fontSize: 12 }} placeholder="https://xxxx.supabase.co" value={sbUrl} onChange={(e) => setSbUrl(e.target.value)} />
@@ -906,6 +911,10 @@ export function Integraciones() {
               <Switch checked={autoSync} onChange={(v) => { setAutoSync(v); setConfig({ autoSyncCloud: v }); toast(v ? "Auto-sincronización activada (cada cambio)" : "Auto-sincronización apagada", "ok"); }} />
               Sincronizar automáticamente tras cada cambio (2.5 s)
             </label>
+            <p className="mt-2 mb-0 d-flex align-items-center gap-2" style={{ fontSize: 11.5, color: "var(--ink-soft)" }}>
+              <i className="bi bi-broadcast-pin" style={{ color: rtEstado === "on" ? "var(--ok)" : "var(--ink-faint)" }} />
+              Lectura en tiempo real: los cambios hechos en otro dispositivo aparecen aquí al instante.
+            </p>
             <p className="mt-2 mb-0" style={{ fontSize: 11.5, color: "var(--ink-faint)" }}>
               <ShieldCheck size={12} style={{ verticalAlign: -2, color: "var(--ok)" }} /> La anon key es pública por diseño; la seguridad la da RLS en Supabase.
             </p>
