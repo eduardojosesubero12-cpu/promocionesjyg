@@ -293,7 +293,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           last: Date.now(), ok: true,
           msg: faltantes.length === 0
             ? "Base de datos subida a Supabase (18 tablas)"
-            : `Subida correcta · ${18 - faltantes.length}/18 tablas (${faltantes.length} de registro omitidas)`,
+            : `Subida correcta · ${18 - faltantes.length}/18 tablas · faltan: ${faltantes.join(", ")}`,
         });
         void testCloudNow();
         return true;

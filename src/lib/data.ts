@@ -618,6 +618,33 @@ export const SUPABASE_SETUP_SQL = (() => {
 })();
 
 /* ============================================================
+   SQL enfocado: crea SOLO las tablas que faltan en Supabase.
+   Se genera dinámicamente a partir de la lista de faltantes
+   detectada por la verificación de conexión.
+   ============================================================ */
+export function sqlParaTablasFaltantes(faltantes: string[]): string {
+  if (!faltantes.length) return "";
+  const bloques: string[] = [];
+  for (const t of faltantes) {
+    const re = new RegExp(`create table if not exists ${t} \\([\\s\\S]*?\\);`, "m");
+    const m = SUPABASE_SQL.match(re);
+    if (m) bloques.push(m[0]);
+    bloques.push(`alter table ${t} enable row level security;`);
+    bloques.push(`drop policy if exists "crm_all" on ${t};`);
+    bloques.push(`create policy "crm_all" on ${t} for all using (true) with check (true);`);
+    bloques.push(_realtimeIdem(t));
+    bloques.push("");
+  }
+  return (
+    `-- SQL para crear SOLO las ${faltantes.length} tablas que faltan en tu Supabase:\n` +
+    `-- ${faltantes.join(", ")}\n` +
+    `-- Pegar en: Supabase → SQL Editor → New query → Run\n` +
+    `-- No afecta tus datos existentes.\n\n` +
+    bloques.join("\n")
+  );
+}
+
+/* ============================================================
    SEMILLAS
    ============================================================ */
 export const SEED_ESCUELAS: Escuela[] = [
