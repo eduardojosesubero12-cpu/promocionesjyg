@@ -27,7 +27,30 @@ export interface Cotizacion { id: string; numero: string; fecha: string; cliente
 export interface Sesion { id: string; escuelaId: string; fecha: string; hora: string; fotografo: string; estado: "Agendada" | "Realizada"; fotos: number; nota: string; }
 export interface Evento { id: string; fecha: string; hora: string; titulo: string; tipo: "sesion" | "entrega" | "cobranza" | "otro"; escuelaId?: string; }
 export interface MensajeLog { id: string; fecha: string; destinatario: string; telefono: string; plantilla: string; texto: string; }
-export interface Usuario { id: string; nombre: string; usuario: string; rol: Rol; activo: boolean; }
+export interface Usuario { id: string; nombre: string; usuario: string; email: string; password: string; rol: Rol; activo: boolean; }
+
+/* ============================================================
+   AUTENTICACIÓN — hash de contraseñas (SHA-256 con salt).
+   Los seeds usan el prefijo "plain:" y se migran a hash real
+   en el primer inicio de sesión (migración transparente).
+   ============================================================ */
+export const PASS_SALT = "jyg-crm-2026";
+export async function hashPass(pw: string): Promise<string> {
+  try {
+    const data = new TextEncoder().encode(PASS_SALT + pw);
+    const buf = await crypto.subtle.digest("SHA-256", data);
+    return Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, "0")).join("");
+  } catch {
+    let h1 = 5381, h2 = 52711;
+    const s = PASS_SALT + pw;
+    for (let i = 0; i < s.length; i++) { const c = s.charCodeAt(i); h1 = (h1 * 33) ^ c; h2 = (h2 * 33) ^ c; }
+    return "fb" + (h1 >>> 0).toString(16) + (h2 >>> 0).toString(16);
+  }
+}
+export async function verificarPass(pw: string, stored: string): Promise<boolean> {
+  if (stored.startsWith("plain:")) return stored.slice(6) === pw;
+  return (await hashPass(pw)) === stored;
+}
 export interface HistorialTasa { id: string; fecha: string; usd: number; euro: number; paralelo: number; fuente: "dolarapi" | "manual"; actualizado: number; }
 export interface PaqueteEscuelaArticulo { nombre: string; cantidad: number; }
 export interface PaqueteEscuela { id: string; escuelaId: string; nombre: string; tipoPaqueteId: string; precio: number; articulos: PaqueteEscuelaArticulo[]; nota: string; activo: boolean; creado: string; }
@@ -830,11 +853,14 @@ export const SEED_EVENTOS: Evento[] = [
   { id: "ev1", fecha: todayISO(), hora: "16:00", titulo: "Entrega de paquetes — U.E. Simón Bolívar", tipo: "entrega", escuelaId: "es1" },
   { id: "ev2", fecha: new Date(Date.now() + 2 * 86400000).toISOString().slice(0, 10), hora: "10:00", titulo: "Ruta de cobranza — Valencia centro", tipo: "cobranza" },
 ];
+/* Credenciales de acceso del equipo JyG.
+   Las contraseñas se guardan con prefijo "plain:" y se migran a hash
+   SHA-256 automáticamente en el primer inicio de sesión. */
 export const SEED_USUARIOS: Usuario[] = [
-  { id: "u1", nombre: "Eduardo Subero", usuario: "eduardo", rol: "admin", activo: true },
-  { id: "u2", nombre: "Génesis Marín", usuario: "genesis", rol: "operador", activo: true },
-  { id: "u3", nombre: "Luis Rodríguez", usuario: "luis", rol: "produccion", activo: true },
-  { id: "u4", nombre: "Karla Díaz", usuario: "karla", rol: "cobranza", activo: true },
+  { id: "u1", nombre: "Administrador JyG", usuario: "admin", email: "admin@jyg.com.ve", password: "plain:JyG-Admin-2026", rol: "admin", activo: true },
+  { id: "u2", nombre: "Operador de Registro", usuario: "registro", email: "registro@jyg.com.ve", password: "plain:JyG-Registro-2026", rol: "operador", activo: true },
+  { id: "u3", nombre: "Equipo de Producción", usuario: "produccion", email: "produccion@jyg.com.ve", password: "plain:JyG-Produccion-2026", rol: "produccion", activo: true },
+  { id: "u4", nombre: "Cobranza", usuario: "cobranza", email: "cobranza@jyg.com.ve", password: "plain:JyG-Cobranza-2026", rol: "cobranza", activo: true },
 ];
 const hist = (dias: number, base: number): HistorialTasa[] =>
   Array.from({ length: dias }, (_, i) => {

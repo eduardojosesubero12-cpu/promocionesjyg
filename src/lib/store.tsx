@@ -2,7 +2,7 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useR
 import {
   ACCESOS_DEFAULT, SEED_CONFIG, SEED_COTIZACIONES, SEED_DOCENTES, SEED_ESCUELAS, SEED_ESTUDIANTES,
   SEED_EVENTOS, SEED_HISTORIAL, SEED_PAQUETES_ESCUELAS, SEED_SESIONES, SEED_USUARIOS,
-  codigosCompletos, estudianteTotales, todayISO, uid,
+  codigosCompletos, estudianteTotales, hashPass, todayISO, uid, verificarPass,
 } from "./data";
 import type {
   Config, Cotizacion, CRMData, Docente, Escuela, EscaneoLog, Estudiante, Evento, FacturaLog,
@@ -45,6 +45,9 @@ interface Ctx {
   tasa: Tasa; tasaLoading: boolean; refreshTasa: () => void;
   ocrOpen: boolean; setOcrOpen: (v: boolean) => void; ocrDraft: OcrDraft | null; setOcrDraft: (d: OcrDraft | null) => void;
   user: Usuario; can: (r: Route) => boolean; setCurrentUser: (id: string) => void;
+  sesion: Usuario | null;
+  login: (email: string, password: string) => Promise<{ ok: boolean; error?: string }>;
+  logout: () => void;
   setRolPermisos: (rol: Rol, rutas: string[]) => void; setRolActivo: (rol: Rol, activo: boolean) => void;
   confirm: (c: ConfirmState) => Promise<boolean>; confirmState: ConfirmState | null; resolveConfirm: (v: boolean) => void;
   success: (title?: string) => void; successState: { title: string } | null; closeSuccess: () => void;
@@ -104,6 +107,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [confirmState, setConfirmState] = useState<ConfirmState | null>(null);
   const [successState, setSuccessState] = useState<{ title: string } | null>(null);
   const [toasts, setToasts] = useState<Toast[]>([]);
+  /* Sesión de usuario (persistida en el navegador) */
+  const [sesion, setSesion] = useState<Usuario | null>(() => {
+    try { const raw = localStorage.getItem("jyg-sesion"); return raw ? (JSON.parse(raw) as Usuario) : null; } catch { return null; }
+  });
   const [syncInfo, setSyncInfo] = useState<{ last: number; ok: boolean; msg: string } | null>(null);
   const [syncing, setSyncing] = useState(false);
   const confirmResolve = useRef<((v: boolean) => void) | null>(null);
@@ -214,6 +221,28 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const deleteEvento = useCallback((id: string) => mutate((d) => ({ ...d, eventos: d.eventos.filter((x) => x.id !== id) })), [mutate]);
   const saveUsuario = useCallback((u: Usuario) => mutate((d) => ({ ...d, usuarios: upsert(d.usuarios, u) })), [mutate]);
   const deleteUsuario = useCallback((id: string) => mutate((d) => ({ ...d, usuarios: d.usuarios.filter((x) => x.id !== id) })), [mutate]);
+
+  /* ---------- Inicio de sesión (correo + contraseña) ---------- */
+  const login = useCallback(async (email: string, password: string): Promise<{ ok: boolean; error?: string }> => {
+    const u = dbRef.current.usuarios.find((x) => x.email.toLowerCase() === email.trim().toLowerCase());
+    if (!u) return { ok: false, error: "No existe un usuario con ese correo." };
+    if (!u.activo) return { ok: false, error: "Este usuario está desactivado. Contacta al administrador." };
+    const valida = await verificarPass(password, u.password || "");
+    if (!valida) return { ok: false, error: "La contraseña es incorrecta." };
+    /* Migración transparente: si la contraseña estaba en "plain:", la guardamos hasheada */
+    if ((u.password || "").startsWith("plain:")) {
+      const hash = await hashPass(password);
+      mutate((d) => ({ ...d, usuarios: d.usuarios.map((x) => (x.id === u.id ? { ...x, password: hash } : x)) }));
+    }
+    setSesion(u);
+    try { localStorage.setItem("jyg-sesion", JSON.stringify(u)); } catch { /* noop */ }
+    return { ok: true };
+  }, [mutate]);
+  const logout = useCallback(() => {
+    setSesion(null);
+    try { localStorage.removeItem("jyg-sesion"); } catch { /* noop */ }
+  }, []);
+
   const setConfig = useCallback((patch: Partial<Config>) => mutate((d) => ({ ...d, config: { ...d.config, ...patch } })), [mutate]);
   const deleteTasaHistorial = useCallback((id: string) => mutate((d) => ({ ...d, historialTasas: d.historialTasas.filter((x) => x.id !== id) })), [mutate]);
   const clearTasaHistorial = useCallback(() => mutate((d) => ({ ...d, historialTasas: [] })), [mutate]);
@@ -423,7 +452,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     db, route, param, setParam, setRoute,
     tasa, tasaLoading, refreshTasa,
     ocrOpen, setOcrOpen, ocrDraft, setOcrDraft,
-    user, can, setCurrentUser, setRolPermisos, setRolActivo,
+    user, can, setCurrentUser, sesion, login, logout, setRolPermisos, setRolActivo,
     confirm, confirmState, resolveConfirm, success, successState, closeSuccess, toast, toasts,
     saveEscuela, deleteEscuela, saveDocente, deleteDocente,
     saveEstudiante, deleteEstudiante, addPago, deletePago, setPedidoEstado, saveCodigos,
