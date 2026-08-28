@@ -578,6 +578,46 @@ alter publication supabase_realtime add table escaneos_ocr;
 alter publication supabase_realtime add table registros_produccion;`;
 
 /* ============================================================
+   CONFIGURACIÓN COMPLETA (desde cero) — un solo script idempotente.
+   Crea las 18 tablas, RLS, políticas y tiempo real. Seguro de
+   ejecutar varias veces: no borra datos y no falla si ya existe.
+   ============================================================ */
+const _policyIdem = (linea: string) => {
+  const m = linea.match(/^create policy "crm_all" on (\w+)/);
+  if (!m) return linea;
+  return `drop policy if exists "crm_all" on ${m[1]};\n${linea}`;
+};
+const _realtimeIdem = (t: string) =>
+  `do $$ begin\n  if not exists (select 1 from pg_publication_tables where pubname='supabase_realtime' and tablename='${t}') then\n    alter publication supabase_realtime add table ${t};\n  end if;\nend $$;`;
+
+export const SUPABASE_SETUP_SQL = (() => {
+  const cuerpo = SUPABASE_SQL
+    .split("\n")
+    .map((l) => {
+      const t = l.trim();
+      if (t.startsWith('create policy "crm_all"')) return _policyIdem(t);
+      if (t.startsWith("alter publication supabase_realtime add table")) return "";
+      return l;
+    })
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n");
+  const realtime = DB_TABLES.map((x) => _realtimeIdem(x.tabla)).join("\n");
+  return (
+    "-- ═══════════════════════════════════════════════════════════\n" +
+    "-- CRM PROMOCIONES JyG — CONFIGURACIÓN COMPLETA DE SUPABASE\n" +
+    "-- Un solo script para configurar el proyecto DESDE CERO.\n" +
+    "-- También es seguro ejecutarlo sobre un proyecto existente:\n" +
+    "-- no borra datos y no falla si algo ya está creado.\n" +
+    "-- Pegar TODO en: Supabase → SQL Editor → New query → Run\n" +
+    "-- ═══════════════════════════════════════════════════════════\n\n" +
+    cuerpo +
+    "\n\n-- ═══ TIEMPO REAL (lectura en vivo desde el CRM) ═══\n" +
+    realtime +
+    "\n\n-- ═══ LISTO ═══\n-- Ahora copia la URL del proyecto y la anon key en el CRM:\n-- Integraciones → 1 · Conectar el proyecto Supabase\n"
+  );
+})();
+
+/* ============================================================
    SEMILLAS
    ============================================================ */
 export const SEED_ESCUELAS: Escuela[] = [
