@@ -7,7 +7,7 @@ import { useApp } from "../lib/store";
 import type { CatAdicional, PaqueteEscuela, Rol, Usuario } from "../lib/data";
 import {
   ACCESOS_DEFAULT, API_DOLARES, API_EUROS, DB_TABLES, MIGRACIONES_SQL, MODULOS_GRUPOS, OPENROUTER_MODELOS, ORDEN_MATERIALES,
-  PAQUETES, ROL_DESC, ROL_LABEL, ROLES_INFO, SUPABASE_SQL, TODOS_MODULOS,
+  PAQUETES, ROL_DESC, ROL_LABEL, ROLES_INFO, SUPABASE_SETUP_SQL, TODOS_MODULOS,
   computeProduccion, downloadFile, estudianteTotales, fmtBs, fmtFecha, fmtFechaHoraViva, fmtHaceSegundos,
   fmtUSD, getAdicionales, getGrados, getSecciones, getTallas, toCSV, todayISO, uid,
 } from "../lib/data";
@@ -943,8 +943,8 @@ export function Integraciones() {
             } />
             {verSql ? (
               <div className="position-relative">
-                <pre className="p-3 rounded-3 overflow-auto" style={{ background: "#0d1524", color: "#a8c6e8", fontSize: 10.5, maxHeight: 220, fontFamily: "ui-monospace, Menlo, monospace" }}>{SUPABASE_SQL}</pre>
-                <button className="btn btn-gold btn-xs position-absolute" style={{ top: 10, right: 10 }} onClick={() => { navigator.clipboard?.writeText(SUPABASE_SQL).then(() => toast("Esquema SQL copiado", "ok")).catch(() => undefined); }}><Copy size={11} /> Copiar</button>
+                <pre className="p-3 rounded-3 overflow-auto" style={{ background: "#0d1524", color: "#a8c6e8", fontSize: 10.5, maxHeight: 220, fontFamily: "ui-monospace, Menlo, monospace" }}>{SUPABASE_SETUP_SQL}</pre>
+                <button className="btn btn-gold btn-xs position-absolute" style={{ top: 10, right: 10 }} onClick={() => { navigator.clipboard?.writeText(SUPABASE_SETUP_SQL).then(() => toast("Esquema SQL copiado (seguro de repetir)", "ok")).catch(() => undefined); }}><Copy size={11} /> Copiar</button>
               </div>
             ) : (
               <div className="row g-2">
