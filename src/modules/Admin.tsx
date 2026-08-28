@@ -860,8 +860,12 @@ export function Integraciones() {
             title={cloudStatus?.ok ? `Conectado · ${cloudStatus.tablas} tablas · ${cloudStatus.filas} filas · verificado ${fmtHaceSegundos(cloudStatus.last, now)}` : "Re-verificar conexión"}
             onClick={() => void testCloudNow()}
           >
-            <Badge tone={cloudStatus?.ok ? "green" : cloudStatus ? "red" : "slate"} dot>
-              Supabase: {cloudStatus?.ok ? `Conectado · ${cloudStatus.tablas} tablas` : cloudStatus ? "Sin conexión" : "Verificando…"}
+            <Badge tone={cloudStatus?.ok ? (cloudStatus.faltantes.length === 0 ? "green" : "amber") : cloudStatus ? "red" : "slate"} dot>
+              {cloudStatus?.ok
+                ? (cloudStatus.faltantes.length === 0
+                  ? `Supabase: Conectado · ${cloudStatus.tablas}/18 tablas`
+                  : `Supabase: Conectado · esquema ${cloudStatus.tablas}/18 (migración pendiente)`)
+                : cloudStatus ? "Supabase: Sin conexión" : "Supabase: Verificando…"}
             </Badge>
           </button>
           <Badge tone={rtEstado === "on" ? "green" : rtEstado === "error" ? "red" : "slate"} dot>
@@ -960,14 +964,23 @@ export function Integraciones() {
           </div>
         </div>
 
-        {/* Migración — para esquemas antiguos (columnas faltantes) */}
+        {/* Migración — para esquemas antiguos (tablas o columnas faltantes) */}
         <div className="col-12">
-          <div className="card p-3 p-md-4" style={{ borderLeft: "4px solid var(--warn)" }}>
+          <div className="card p-3 p-md-4" style={{ borderLeft: `4px solid ${cloudStatus?.faltantes.length ? "var(--danger)" : "var(--warn)"}`, boxShadow: cloudStatus?.faltantes.length ? "0 0 0 3px color-mix(in srgb, var(--danger) 12%, transparent)" : undefined }}>
             <SectionHead
-              title="¿Error de columna al subir? · Ejecuta la migración"
-              desc="Si tu Supabase se creó con un esquema anterior (ej. falta la columna 'extra' en estudiantes), este SQL agrega las columnas nuevas sin borrar datos"
+              title={cloudStatus?.faltantes.length
+                ? `Migración pendiente · faltan ${cloudStatus.faltantes.length} tabla(s): ${cloudStatus.faltantes.join(", ")}`
+                : "¿Error de columna al subir? · Ejecuta la migración"}
+              desc={cloudStatus?.faltantes.length
+                ? "Tu Supabase tiene un esquema antiguo. Ejecuta el SQL de migración una vez para crear las tablas que faltan (no borra datos)."
+                : "Si tu Supabase se creó con un esquema anterior (ej. falta la columna 'extra' en estudiantes), este SQL agrega las columnas nuevas sin borrar datos"}
               actions={<button className="btn btn-soft btn-xs" onClick={() => setVerMig(!verMig)}>{verMig ? "Ocultar SQL" : "Ver SQL de migración"}</button>}
             />
+            {cloudStatus?.faltantes.length ? (
+              <div className="d-flex flex-wrap gap-1 mb-2">
+                {cloudStatus.faltantes.map((t) => <Badge key={t} tone="red" dot>{t}</Badge>)}
+              </div>
+            ) : null}
             {verMig ? (
               <div className="position-relative">
                 <pre className="p-3 rounded-3 overflow-auto" style={{ background: "#0d1524", color: "#a8c6e8", fontSize: 10.5, maxHeight: 240, fontFamily: "ui-monospace, Menlo, monospace" }}>{MIGRACIONES_SQL}</pre>
@@ -982,6 +995,14 @@ export function Integraciones() {
                 </span>
               </div>
             )}
+            <div className="d-flex gap-2 mt-3">
+              <button className="btn btn-primary btn-sm" onClick={() => { void testCloudNow(); toast("Verificando esquema…", "ok"); }}>
+                <i className="bi bi-arrow-clockwise" /> Verificar migración
+              </button>
+              {cloudStatus?.faltantes.length === 0 && cloudStatus?.ok && (
+                <Badge tone="green" dot>Esquema completo · 18/18 tablas</Badge>
+              )}
+            </div>
           </div>
         </div>
 

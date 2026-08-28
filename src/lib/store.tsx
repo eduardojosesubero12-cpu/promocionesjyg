@@ -68,12 +68,12 @@ interface Ctx {
   logEscaneo: (s: Omit<EscaneoLog, "id" | "fecha">) => void;
   logProduccion: (r: Omit<ProduccionLog, "id" | "fecha">) => void;
   exportBackup: () => string; importBackup: (json: string) => boolean;
-  testCloud: (url?: string, key?: string) => Promise<{ tablas: number; filas: number }>;
+  testCloud: (url?: string, key?: string) => Promise<{ tablas: number; filas: number; faltantes: string[] }>;
   syncToCloud: (onTabla?: (t: string, s: "busy" | "ok" | "err", f?: number) => void) => Promise<boolean>;
   restoreFromCloud: () => Promise<boolean>;
   syncInfo: { last: number; ok: boolean; msg: string } | null; syncing: boolean;
   rtEstado: "off" | "on" | "error";
-  cloudStatus: { ok: boolean; tablas: number; filas: number; last: number } | null;
+  cloudStatus: { ok: boolean; tablas: number; filas: number; last: number; faltantes: string[] } | null;
   testCloudNow: () => Promise<void>;
   alerts: { key: string; title: string; desc: string; route: Route }[];
 }
@@ -114,7 +114,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const applyingRemote = useRef(false);  /* evita bucles: no re-subir lo que llegó de la nube */
   const rtTimer = useRef<any>(null);     /* debounce de eventos de tiempo real */
   const [rtEstado, setRtEstado] = useState<"off" | "on" | "error">("off");
-  const [cloudStatus, setCloudStatus] = useState<{ ok: boolean; tablas: number; filas: number; last: number } | null>(null);
+  const [cloudStatus, setCloudStatus] = useState<{ ok: boolean; tablas: number; filas: number; last: number; faltantes: string[] } | null>(null);
 
   /* Persistencia */
   useEffect(() => {
@@ -270,9 +270,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     if (!supabaseUrl || !supabaseKey) { setCloudStatus(null); return; }
     try {
       const r = await testCloud(supabaseUrl, supabaseKey);
-      setCloudStatus({ ok: true, tablas: r.tablas, filas: r.filas, last: Date.now() });
+      setCloudStatus({ ok: true, tablas: r.tablas, filas: r.filas, faltantes: r.faltantes, last: Date.now() });
     } catch {
-      setCloudStatus({ ok: false, tablas: 0, filas: 0, last: Date.now() });
+      setCloudStatus({ ok: false, tablas: 0, filas: 0, faltantes: [], last: Date.now() });
     }
   }, [testCloud]);
   /* Al abrir el CRM verifica la conexión y la re-verifica cada minuto */
@@ -287,18 +287,20 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setSyncing(true);
     try {
       const { subirTodo } = await import("./supabase");
-      const { fallos } = await subirTodo(client, dbRef.current, onTabla);
+      const { fallos, faltantes } = await subirTodo(client, dbRef.current, onTabla);
       if (fallos.length === 0) {
-        setSyncInfo({ last: Date.now(), ok: true, msg: "Base de datos subida a Supabase (18 tablas)" });
+        setSyncInfo({
+          last: Date.now(), ok: true,
+          msg: faltantes.length === 0
+            ? "Base de datos subida a Supabase (18 tablas)"
+            : `Subida correcta · ${18 - faltantes.length}/18 tablas (${faltantes.length} de registro omitidas)`,
+        });
         void testCloudNow();
         return true;
       }
-      const esquemaViejo = fallos.some((f) => /column|schema/i.test(f.error));
       setSyncInfo({
         last: Date.now(), ok: false,
-        msg: esquemaViejo
-          ? `Tu Supabase tiene un esquema antiguo (falló: ${fallos.map((f) => f.tabla).join(", ")}). Ejecuta el SQL de migración en Integraciones.`
-          : `Subida parcial — fallaron: ${fallos.map((f) => f.tabla).join(", ")}`,
+        msg: `Subida parcial — fallaron: ${fallos.map((f) => f.tabla).join(", ")}`,
       });
       return false;
     } catch (e: any) {

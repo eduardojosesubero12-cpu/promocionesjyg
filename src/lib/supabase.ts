@@ -72,14 +72,20 @@ export function rowsToDb(rows: Record<string, any[]>, base: CRMData): CRMData {
   };
 }
 
-export async function probarConexion(client: SupabaseClient): Promise<{ tablas: number; filas: number }> {
+/* Devuelve cuántas tablas existen y cuántas faltan (esquema antiguo),
+   sin abortar: así el CRM sabe exactamente qué migrar. */
+export async function probarConexion(client: SupabaseClient): Promise<{ tablas: number; filas: number; faltantes: string[] }> {
   let tablas = 0, filas = 0;
+  const faltantes: string[] = [];
   for (const { tabla } of DB_TABLES) {
     const { count, error } = await client.from(tabla).select("id", { count: "exact", head: true });
-    if (error) throw new Error(`La tabla "${tabla}" no existe o no es accesible: ${error.message}`);
+    if (error) {
+      if (/does not exist|schema cache|could not find the table/i.test(error.message)) { faltantes.push(tabla); continue; }
+      throw new Error(`La tabla "${tabla}" no es accesible: ${error.message}`);
+    }
     tablas++; filas += count || 0;
   }
-  return { tablas, filas };
+  return { tablas, filas, faltantes };
 }
 
 const ORDEN = ["escuelas", "docentes", "estudiantes", "pagos", "adicionales_items", "cotizaciones", "cotizacion_items", "sesiones", "eventos", "mensajes", "usuarios", "historial_tasas", "paquetes_escuelas", "configuracion", "facturas", "tarjetas_qr", "escaneos_ocr", "registros_produccion"];
@@ -87,9 +93,10 @@ const ORDEN = ["escuelas", "docentes", "estudiantes", "pagos", "adicionales_item
 /* Sube todas las tablas. Es tolerante: si una tabla falla (p. ej. le falta
    una columna por un esquema antiguo), continúa con el resto y devuelve la
    lista de fallos para que el usuario ejecute la migración SQL. */
-export async function subirTodo(client: SupabaseClient, db: CRMData, onTabla?: (t: string, s: "busy" | "ok" | "err", f?: number) => void): Promise<{ fallos: { tabla: string; error: string }[] }> {
+export async function subirTodo(client: SupabaseClient, db: CRMData, onTabla?: (t: string, s: "busy" | "ok" | "err", f?: number) => void): Promise<{ fallos: { tabla: string; error: string }[]; faltantes: string[] }> {
   const rows = dbToRows(db);
   const fallos: { tabla: string; error: string }[] = [];
+  const faltantes: string[] = [];
   for (const tabla of ORDEN) {
     onTabla?.(tabla, "busy");
     try {
@@ -102,11 +109,18 @@ export async function subirTodo(client: SupabaseClient, db: CRMData, onTabla?: (
       }
       onTabla?.(tabla, "ok", data.length);
     } catch (e: any) {
+      const msg = e?.message || "desconocido";
+      /* Tabla que no existe en Supabase (esquema antiguo): se omite, no se cuenta como fallo */
+      if (/does not exist|schema cache|could not find the table|could not find the '.*' column/i.test(msg)) {
+        faltantes.push(tabla);
+        onTabla?.(tabla, "err");
+        continue;
+      }
       onTabla?.(tabla, "err");
-      fallos.push({ tabla, error: e?.message || "desconocido" });
+      fallos.push({ tabla, error: msg });
     }
   }
-  return { fallos };
+  return { fallos, faltantes };
 }
 
 export async function descargarTodo(client: SupabaseClient): Promise<Record<string, any[]>> {
