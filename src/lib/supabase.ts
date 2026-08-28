@@ -22,6 +22,10 @@ export function dbToRows(db: CRMData): Record<string, any[]> {
     usuarios: db.usuarios.map((u) => ({ id: u.id, nombre: u.nombre, usuario: u.usuario, rol: u.rol, activo: u.activo })),
     historial_tasas: db.historialTasas.map((h) => ({ id: h.id, fecha: h.fecha, usd: h.usd, euro: h.euro, paralelo: h.paralelo, fuente: h.fuente, actualizado: h.actualizado })),
     paquetes_escuelas: db.paquetesEscuelas.map((p) => ({ id: p.id, escuela_id: p.escuelaId, nombre: p.nombre, tipo_paquete_id: p.tipoPaqueteId, precio: p.precio, articulos: p.articulos, nota: p.nota, activo: p.activo, creado: p.creado })),
+    facturas: (db.facturas || []).map((f) => ({ id: f.id, numero: f.numero, estudiante_id: f.estudianteId, estudiante: f.estudiante, fecha: f.fecha, total: f.total, accion: f.accion })),
+    tarjetas_qr: (db.tarjetas || []).map((t) => ({ id: t.id, fecha: t.fecha, estudiante_id: t.estudianteId, estudiante: t.estudiante, accion: t.accion, lote: t.lote })),
+    escaneos_ocr: (db.escaneos || []).map((s) => ({ id: s.id, fecha: s.fecha, motor: s.motor, ok: s.ok, nombres: s.nombres, apellidos: s.apellidos, ci: s.ci })),
+    registros_produccion: (db.produccionLogs || []).map((r) => ({ id: r.id, fecha: r.fecha, detalle: r.detalle, materiales: r.materiales, pedidos: r.pedidos })),
     configuracion: [{ id: "jyg", data: db.config, seq_pedido: db.seqPedido, seq_cot: db.seqCot, current_user_id: db.currentUserId }],
   };
 }
@@ -58,25 +62,41 @@ export function rowsToDb(rows: Record<string, any[]>, base: CRMData): CRMData {
     usuarios: (rows.usuarios || []).map((u) => ({ id: u.id, nombre: u.nombre, usuario: u.usuario || "", rol: u.rol || "operador", activo: !!u.activo })),
     historialTasas: (rows.historial_tasas || []).map((h) => ({ id: h.id, fecha: h.fecha, usd: Number(h.usd), euro: Number(h.euro), paralelo: Number(h.paralelo), fuente: h.fuente || "dolarapi", actualizado: Number(h.actualizado) || 0 })),
     paquetesEscuelas: (rows.paquetes_escuelas || []).map((p) => ({ id: p.id, escuelaId: p.escuela_id || "", nombre: p.nombre, tipoPaqueteId: p.tipo_paquete_id || "personalizado", precio: Number(p.precio) || 0, articulos: p.articulos || [], nota: p.nota || "", activo: !!p.activo, creado: p.creado || "" })),
+    facturas: (rows.facturas || []).map((f) => ({ id: f.id, numero: f.numero || "", estudianteId: f.estudiante_id || "", estudiante: f.estudiante || "", fecha: f.fecha || "", total: Number(f.total) || 0, accion: f.accion || "" })),
+    tarjetas: (rows.tarjetas_qr || []).map((t) => ({ id: t.id, fecha: t.fecha || "", estudianteId: t.estudiante_id || "", estudiante: t.estudiante || "", accion: t.accion || "", lote: t.lote || "" })),
+    escaneos: (rows.escaneos_ocr || []).map((s) => ({ id: s.id, fecha: s.fecha || "", motor: s.motor || "", ok: !!s.ok, nombres: s.nombres || "", apellidos: s.apellidos || "", ci: s.ci || "" })),
+    produccionLogs: (rows.registros_produccion || []).map((r) => ({ id: r.id, fecha: r.fecha || "", detalle: r.detalle || "", materiales: Number(r.materiales) || 0, pedidos: Number(r.pedidos) || 0 })),
     config: cfg?.data ? { ...base.config, ...cfg.data } : base.config,
     currentUserId: cfg?.current_user_id || base.currentUserId,
     seqPedido: cfg?.seq_pedido ?? base.seqPedido, seqCot: cfg?.seq_cot ?? base.seqCot,
   };
 }
 
-export async function probarConexion(client: SupabaseClient): Promise<{ tablas: number; filas: number }> {
+/* Devuelve cuántas tablas existen y cuántas faltan (esquema antiguo),
+   sin abortar: así el CRM sabe exactamente qué migrar. */
+export async function probarConexion(client: SupabaseClient): Promise<{ tablas: number; filas: number; faltantes: string[] }> {
   let tablas = 0, filas = 0;
+  const faltantes: string[] = [];
   for (const { tabla } of DB_TABLES) {
     const { count, error } = await client.from(tabla).select("id", { count: "exact", head: true });
-    if (error) throw new Error(`La tabla "${tabla}" no existe o no es accesible: ${error.message}`);
+    if (error) {
+      if (/does not exist|schema cache|could not find the table/i.test(error.message)) { faltantes.push(tabla); continue; }
+      throw new Error(`La tabla "${tabla}" no es accesible: ${error.message}`);
+    }
     tablas++; filas += count || 0;
   }
-  return { tablas, filas };
+  return { tablas, filas, faltantes };
 }
 
-const ORDEN = ["escuelas", "docentes", "estudiantes", "pagos", "adicionales_items", "cotizaciones", "cotizacion_items", "sesiones", "eventos", "mensajes", "usuarios", "historial_tasas", "paquetes_escuelas", "configuracion"];
-export async function subirTodo(client: SupabaseClient, db: CRMData, onTabla?: (t: string, s: "busy" | "ok" | "err", f?: number) => void): Promise<void> {
+const ORDEN = ["escuelas", "docentes", "estudiantes", "pagos", "adicionales_items", "cotizaciones", "cotizacion_items", "sesiones", "eventos", "mensajes", "usuarios", "historial_tasas", "paquetes_escuelas", "configuracion", "facturas", "tarjetas_qr", "escaneos_ocr", "registros_produccion"];
+
+/* Sube todas las tablas. Es tolerante: si una tabla falla (p. ej. le falta
+   una columna por un esquema antiguo), continúa con el resto y devuelve la
+   lista de fallos para que el usuario ejecute la migración SQL. */
+export async function subirTodo(client: SupabaseClient, db: CRMData, onTabla?: (t: string, s: "busy" | "ok" | "err", f?: number) => void): Promise<{ fallos: { tabla: string; error: string }[]; faltantes: string[] }> {
   const rows = dbToRows(db);
+  const fallos: { tabla: string; error: string }[] = [];
+  const faltantes: string[] = [];
   for (const tabla of ORDEN) {
     onTabla?.(tabla, "busy");
     try {
@@ -88,8 +108,19 @@ export async function subirTodo(client: SupabaseClient, db: CRMData, onTabla?: (
         if (ins.error) throw new Error(ins.error.message);
       }
       onTabla?.(tabla, "ok", data.length);
-    } catch (e: any) { onTabla?.(tabla, "err"); throw new Error(`${tabla}: ${e.message}`); }
+    } catch (e: any) {
+      const msg = e?.message || "desconocido";
+      /* Tabla que no existe en Supabase (esquema antiguo): se omite, no se cuenta como fallo */
+      if (/does not exist|schema cache|could not find the table|could not find the '.*' column/i.test(msg)) {
+        faltantes.push(tabla);
+        onTabla?.(tabla, "err");
+        continue;
+      }
+      onTabla?.(tabla, "err");
+      fallos.push({ tabla, error: msg });
+    }
   }
+  return { fallos, faltantes };
 }
 
 export async function descargarTodo(client: SupabaseClient): Promise<Record<string, any[]>> {

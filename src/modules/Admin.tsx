@@ -1,13 +1,13 @@
 import React, { useMemo, useRef, useState } from "react";
 import {
-  BarChart3, Boxes, Check, Copy, Download, Eye, EyeOff, GraduationCap, History, KeyRound,
+  AlertTriangle, BarChart3, Boxes, Check, Copy, Download, Eye, EyeOff, GraduationCap, History, KeyRound,
   Package, Pencil, Plug, Plus, Save, ScanLine, ShieldCheck, Sparkles, Trash2, Upload, UserCog, Users, Wallet, X,
 } from "lucide-react";
 import { useApp } from "../lib/store";
 import type { CatAdicional, PaqueteEscuela, Rol, Usuario } from "../lib/data";
 import {
   ACCESOS_DEFAULT, API_DOLARES, API_EUROS, DB_TABLES, MODULOS_GRUPOS, OPENROUTER_MODELOS, ORDEN_MATERIALES,
-  PAQUETES, ROL_DESC, ROL_LABEL, ROLES_INFO, SUPABASE_SQL, TODOS_MODULOS,
+  PAQUETES, ROL_DESC, ROL_LABEL, ROLES_INFO, SUPABASE_SCHEMA_SEGURO, TODOS_MODULOS,
   computeProduccion, downloadFile, estudianteTotales, fmtBs, fmtFecha, fmtFechaHoraViva, fmtHaceSegundos,
   fmtUSD, getAdicionales, getGrados, getSecciones, getTallas, toCSV, todayISO, uid,
 } from "../lib/data";
@@ -798,13 +798,14 @@ export function Configuracion() {
    INTEGRACIONES — Supabase + historial de tasas
    ============================================================ */
 export function Integraciones() {
-  const { db, setConfig, confirm, success, toast, testCloud, syncToCloud, restoreFromCloud, syncInfo, syncing, deleteTasaHistorial, clearTasaHistorial } = useApp();
+  const { db, setConfig, confirm, success, toast, testCloud, syncToCloud, restoreFromCloud, syncInfo, syncing, rtEstado, cloudStatus, testCloudNow, deleteTasaHistorial, clearTasaHistorial } = useApp();
   const [sbUrl, setSbUrl] = useState(db.config.supabaseUrl);
   const [sbKey, setSbKey] = useState(db.config.supabaseKey);
   const [verKey, setVerKey] = useState(false);
   const [test, setTest] = useState<"idle" | "busy" | "ok" | "fail">("idle");
   const [testInfo, setTestInfo] = useState<{ tablas: number; filas: number } | null>(null);
   const [verSql, setVerSql] = useState(false);
+  const [verMig, setVerMig] = useState(false);
   const [tabEstado, setTabEstado] = useState<Record<string, "busy" | "ok" | "err">>({});
   const [autoSync, setAutoSync] = useState(db.config.autoSyncCloud);
   const now = useNow(1000);
@@ -826,7 +827,7 @@ export function Integraciones() {
     } catch (e: any) { setTest("fail"); toast(e?.message || "No se pudo conectar", "err"); }
   };
   const subir = async () => {
-    const ok = await confirm({ title: "¿Subir la base completa a Supabase?", message: "Las 14 tablas del CRM reemplazarán los datos actuales en la nube.", confirmText: "Sí, Subir" });
+    const ok = await confirm({ title: "¿Subir la base completa a Supabase?", message: "Las 18 tablas del CRM reemplazarán los datos actuales en la nube.", confirmText: "Sí, Subir" });
     if (!ok) return;
     await syncToCloud((t, s) => setTabEstado((v) => ({ ...v, [t]: s })));
   };
@@ -853,11 +854,29 @@ export function Integraciones() {
           <h1>Integraciones</h1>
           <p style={{ fontSize: 13.5, margin: "4px 0 0", color: "var(--ink-soft)" }}>Base de datos en Supabase, historial de la tasa del día y APIs conectadas</p>
         </div>
-        {syncInfo && (
-          <Badge tone={syncInfo.ok ? "green" : "red"} dot>
-            {syncInfo.msg} · {fmtHaceSegundos(syncInfo.last, now)}
+        <div className="d-flex align-items-center gap-2 flex-wrap">
+          <button
+            className="border-0 bg-transparent p-0"
+            title={cloudStatus?.ok ? `Conectado · ${cloudStatus.tablas} tablas · ${cloudStatus.filas} filas · verificado ${fmtHaceSegundos(cloudStatus.last, now)}` : "Re-verificar conexión"}
+            onClick={() => void testCloudNow()}
+          >
+            <Badge tone={cloudStatus?.ok ? (cloudStatus.faltantes.length === 0 ? "green" : "amber") : cloudStatus ? "red" : "slate"} dot>
+              {cloudStatus?.ok
+                ? (cloudStatus.faltantes.length === 0
+                  ? `Supabase: Conectado · ${cloudStatus.tablas}/18 tablas`
+                  : `Supabase: Conectado · esquema ${cloudStatus.tablas}/18 (migración pendiente)`)
+                : cloudStatus ? "Supabase: Sin conexión" : "Supabase: Verificando…"}
+            </Badge>
+          </button>
+          <Badge tone={rtEstado === "on" ? "green" : rtEstado === "error" ? "red" : "slate"} dot>
+            Tiempo real: {rtEstado === "on" ? "Conectado" : rtEstado === "error" ? "Sin conexión" : "Inactivo"}
           </Badge>
-        )}
+          {syncInfo && (
+            <Badge tone={syncInfo.ok ? "green" : "red"} dot>
+              {syncInfo.msg} · {fmtHaceSegundos(syncInfo.last, now)}
+            </Badge>
+          )}
+        </div>
       </div>
 
       {/* Barra de progreso de pasos */}
@@ -881,8 +900,8 @@ export function Integraciones() {
         {/* Paso 1: conexión */}
         <div className="col-12 col-xl-6">
           <div className="card p-3 p-md-4 h-100" style={{ borderLeft: "4px solid var(--jyg-navy)" }}>
-            <SectionHead title="1 · Conectar el proyecto Supabase" desc="URL del proyecto y anon key — Settings → API en Supabase" actions={
-              <Badge tone={paso1 ? "green" : "slate"} dot>{paso1 ? "Credenciales listas" : "Sin configurar"}</Badge>
+            <SectionHead title="1 · Proyecto Supabase del equipo JyG" desc="Ya conectado — cada cambio se sube solo y se lee en tiempo real" actions={
+              <Badge tone={paso1 ? "green" : "slate"} dot>{paso1 ? "Conectado y automático" : "Sin configurar"}</Badge>
             } />
             <Field label="URL del proyecto">
               <input className="input" style={{ fontFamily: "ui-monospace, monospace", fontSize: 12 }} placeholder="https://xxxx.supabase.co" value={sbUrl} onChange={(e) => setSbUrl(e.target.value)} />
@@ -906,6 +925,10 @@ export function Integraciones() {
               <Switch checked={autoSync} onChange={(v) => { setAutoSync(v); setConfig({ autoSyncCloud: v }); toast(v ? "Auto-sincronización activada (cada cambio)" : "Auto-sincronización apagada", "ok"); }} />
               Sincronizar automáticamente tras cada cambio (2.5 s)
             </label>
+            <p className="mt-2 mb-0 d-flex align-items-center gap-2" style={{ fontSize: 11.5, color: "var(--ink-soft)" }}>
+              <i className="bi bi-broadcast-pin" style={{ color: rtEstado === "on" ? "var(--ok)" : "var(--ink-faint)" }} />
+              Lectura en tiempo real: los cambios hechos en otro dispositivo aparecen aquí al instante.
+            </p>
             <p className="mt-2 mb-0" style={{ fontSize: 11.5, color: "var(--ink-faint)" }}>
               <ShieldCheck size={12} style={{ verticalAlign: -2, color: "var(--ok)" }} /> La anon key es pública por diseño; la seguridad la da RLS en Supabase.
             </p>
@@ -915,29 +938,86 @@ export function Integraciones() {
         {/* Paso 2: esquema */}
         <div className="col-12 col-xl-6">
           <div className="card p-3 p-md-4 h-100" style={{ borderLeft: "4px solid var(--jyg-gold)" }}>
-            <SectionHead title="2 · Crear el esquema SQL" desc="Una tabla por módulo (14 en total) — SQL Editor en Supabase" actions={
-              <button className="btn btn-soft btn-xs" onClick={() => setVerSql(!verSql)}>{verSql ? "Ocultar SQL" : "Ver SQL"}</button>
+            <SectionHead title="2 · Esquema SQL" desc="Estado de las 18 tablas en tu Supabase" actions={
+              cloudStatus?.faltantes.length
+                ? <Badge tone="red" dot>{18 - cloudStatus.faltantes.length}/18 tablas</Badge>
+                : cloudStatus?.ok ? <Badge tone="green" dot>18/18 tablas ✓</Badge> : <Badge tone="slate" dot>Sin verificar</Badge>
             } />
-            {verSql ? (
-              <div className="position-relative">
-                <pre className="p-3 rounded-3 overflow-auto" style={{ background: "#0d1524", color: "#a8c6e8", fontSize: 10.5, maxHeight: 220, fontFamily: "ui-monospace, Menlo, monospace" }}>{SUPABASE_SQL}</pre>
-                <button className="btn btn-gold btn-xs position-absolute" style={{ top: 10, right: 10 }} onClick={() => { navigator.clipboard?.writeText(SUPABASE_SQL).then(() => toast("Esquema SQL copiado", "ok")).catch(() => undefined); }}><Copy size={11} /> Copiar</button>
-              </div>
-            ) : (
-              <div className="row g-2">
-                {DB_TABLES.map((t) => (
+            <div className="row g-2">
+              {DB_TABLES.map((t) => {
+                const falta = cloudStatus?.faltantes.includes(t.tabla);
+                return (
                   <div key={t.tabla} className="col-6 col-md-4">
-                    <div className="sb-table-item">
+                    <div className="sb-table-item" style={falta ? { outline: "1.5px solid var(--danger)", outlineOffset: -1 } : undefined}>
                       <span className="tname flex-grow-1 text-truncate">{t.tabla}</span>
                       {tabEstado[t.tabla] === "busy" && <span className="spin" style={{ color: "var(--warn)" }}><i className="bi bi-arrow-repeat" /></span>}
-                      {tabEstado[t.tabla] === "ok" && <Check size={13} style={{ color: "var(--ok)" }} />}
-                      {tabEstado[t.tabla] === "err" && <X size={13} style={{ color: "var(--danger)" }} />}
-                      {!tabEstado[t.tabla] && <span className="dot" style={{ background: "var(--line)", boxShadow: "none" }} />}
+                      {(tabEstado[t.tabla] === "ok" && !falta) && <Check size={13} style={{ color: "var(--ok)" }} />}
+                      {(tabEstado[t.tabla] === "err" || falta) && <X size={13} style={{ color: "var(--danger)" }} />}
+                      {!tabEstado[t.tabla] && !falta && <span className="dot" style={{ background: "var(--line)", boxShadow: "none" }} />}
                     </div>
                   </div>
-                ))}
+                );
+              })}
+            </div>
+            <div className="d-flex align-items-center gap-2 flex-wrap mt-3">
+              <button className="btn btn-primary btn-sm" onClick={() => { void testCloudNow(); toast("Verificando esquema…", "ok"); }}>
+                <i className="bi bi-arrow-clockwise" /> Verificar ahora
+              </button>
+              <button className="btn btn-soft btn-sm" onClick={() => setVerSql(!verSql)}>
+                {verSql ? "Ocultar SQL" : "Ver SQL de migración"}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Esquema completo sin errores — la acción principal */}
+        <div className="col-12">
+          <div
+            className="card p-3 p-md-4"
+            style={{
+              borderLeft: `4px solid ${cloudStatus?.faltantes.length ? "var(--danger)" : "var(--ok)"}`,
+              boxShadow: cloudStatus?.faltantes.length ? "0 0 0 3px color-mix(in srgb, var(--danger) 12%, transparent)" : undefined,
+            }}
+          >
+            <SectionHead
+              title={cloudStatus?.faltantes.length
+                ? <span className="d-flex align-items-center gap-2"><AlertTriangle size={17} style={{ color: "var(--danger)" }} /> Faltan {cloudStatus.faltantes.length} tablas · ejecuta el esquema sin errores</span>
+                : "Esquema completo sin errores · 18 tablas"}
+              desc={cloudStatus?.faltantes.length
+                ? `Ejecuta el SQL una vez para crear: ${cloudStatus.faltantes.join(", ")}. También repara columnas faltantes (como "extra" en estudiantes).`
+                : "Script único y garantizado: crea las 18 tablas, repara columnas, recrea políticas y activa el tiempo real. No borra datos."}
+              actions={<Badge tone={cloudStatus?.faltantes.length ? "red" : "green"} dot>{cloudStatus?.faltantes.length ? "Acción requerida" : "Al día"}</Badge>}
+            />
+
+            {verSql || cloudStatus?.faltantes.length ? (
+              <div className="position-relative">
+                <pre className="p-3 rounded-3 overflow-auto" style={{ background: "#0d1524", color: "#a8c6e8", fontSize: 10.5, maxHeight: 300, fontFamily: "ui-monospace, Menlo, monospace" }}>{SUPABASE_SCHEMA_SEGURO}</pre>
+                <div className="position-absolute d-flex gap-1" style={{ top: 10, right: 10 }}>
+                  <button className="btn btn-ghost btn-xs" style={{ background: "rgba(255,255,255,0.08)", color: "#a8c6e8", borderColor: "rgba(168,198,232,0.3)" }} onClick={() => { downloadFile("esquema-jyg-18-tablas.sql", SUPABASE_SCHEMA_SEGURO, "text/plain"); toast("esquema-jyg-18-tablas.sql descargado", "ok"); }}>
+                    <Download size={11} /> .sql
+                  </button>
+                  <button className="btn btn-gold btn-xs" onClick={() => { navigator.clipboard?.writeText(SUPABASE_SCHEMA_SEGURO).then(() => toast("Esquema completo copiado", "ok")).catch(() => undefined); }}>
+                    <Copy size={11} /> Copiar
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="d-flex align-items-start gap-2 flex-wrap" style={{ fontSize: 12.5, color: "var(--ink-soft)" }}>
+                <span className="d-flex align-items-center justify-content-center rounded-3 flex-shrink-0" style={{ width: 34, height: 34, background: "var(--tint-ok)", color: "var(--ok)" }}><ShieldCheck size={17} /></span>
+                <span style={{ flex: 1, minWidth: 240 }}>
+                  Tu esquema está completo. Si algún día aparece un error de tabla o columna, pulsa{" "}
+                  <b>Ver SQL de migración</b> y ejecuta el script: está garantizado sin errores y nunca toca tus datos.
+                </span>
               </div>
             )}
+
+            <div className="d-flex align-items-center gap-2 flex-wrap mt-3 p-2 rounded-3" style={{ background: "var(--card-bg-2)", fontSize: 12 }}>
+              <i className="bi bi-info-circle" style={{ color: "var(--jyg-navy)" }} />
+              <span style={{ flex: 1, minWidth: 240, color: "var(--ink-soft)" }}>
+                <b>Supabase → SQL Editor → New query</b> · pega el script · <b>Run</b> · luego <b>Verificar ahora</b>.
+                Crea lo que falta, repara columnas y activa el tiempo real — sin errores aunque ya exista todo.
+              </span>
+            </div>
           </div>
         </div>
 

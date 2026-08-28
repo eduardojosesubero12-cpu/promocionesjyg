@@ -49,10 +49,18 @@ export interface Config {
 }
 export interface CatAdicional { nombre: string; precio: number; talla: "" | "letras" | "numerica"; }
 export interface OcrDraft { ci: string; nombres: string; apellidos: string; fecha: string; raw?: string; }
+
+/* ---- Registros por módulo (una tabla por módulo en Supabase) ---- */
+export interface FacturaLog { id: string; numero: string; estudianteId: string; estudiante: string; fecha: string; total: number; accion: string; }
+export interface TarjetaLog { id: string; fecha: string; estudianteId: string; estudiante: string; accion: string; lote: string; }
+export interface EscaneoLog { id: string; fecha: string; motor: string; ok: boolean; nombres: string; apellidos: string; ci: string; }
+export interface ProduccionLog { id: string; fecha: string; detalle: string; materiales: number; pedidos: number; }
+
 export interface CRMData {
   escuelas: Escuela[]; docentes: Docente[]; estudiantes: Estudiante[]; cotizaciones: Cotizacion[];
   sesiones: Sesion[]; eventos: Evento[]; mensajes: MensajeLog[]; usuarios: Usuario[];
   historialTasas: HistorialTasa[]; paquetesEscuelas: PaqueteEscuela[]; config: Config;
+  facturas: FacturaLog[]; tarjetas: TarjetaLog[]; escaneos: EscaneoLog[]; produccionLogs: ProduccionLog[];
   currentUserId: string; seqPedido: number; seqCot: number;
 }
 
@@ -326,7 +334,151 @@ export const DB_TABLES = [
   { tabla: "eventos", label: "Agenda" }, { tabla: "mensajes", label: "Mensajes" },
   { tabla: "usuarios", label: "Usuarios" }, { tabla: "historial_tasas", label: "Historial de tasas" },
   { tabla: "paquetes_escuelas", label: "Paquetes por escuela" }, { tabla: "configuracion", label: "Configuración" },
+  { tabla: "facturas", label: "Facturación" }, { tabla: "tarjetas_qr", label: "Tarjetas QR" },
+  { tabla: "escaneos_ocr", label: "Escáner Inteligente" }, { tabla: "registros_produccion", label: "Producción" },
 ];
+
+/* ============================================================
+   ESQUEMA MAESTRO — definición de las 18 tablas (fuente única)
+   ============================================================ */
+const ESQUEMA_TABLAS: { tabla: string; columnas: [string, string][] }[] = [
+  { tabla: "escuelas", columnas: [
+    ["id", "text primary key"], ["nombre", "text not null"], ["director", "text default ''"],
+    ["telefono", "text default ''"], ["direccion", "text default ''"], ["estado", "text default ''"],
+    ["municipio", "text default ''"], ["anio_escolar", "text default ''"], ["observaciones", "text default ''"],
+  ] },
+  { tabla: "docentes", columnas: [
+    ["id", "text primary key"], ["nombre", "text not null"], ["telefono", "text default ''"],
+    ["escuela_id", "text references escuelas(id)"], ["correo", "text default ''"], ["observaciones", "text default ''"],
+  ] },
+  { tabla: "estudiantes", columnas: [
+    ["id", "text primary key"], ["pedido", "text not null"], ["nombre", "text not null"],
+    ["telefono", "text default ''"], ["representante", "text default ''"], ["ci", "text default ''"],
+    ["escuela_id", "text references escuelas(id)"], ["docente_id", "text references docentes(id)"],
+    ["grado", "text default ''"], ["seccion", "text default ''"], ["paquete_id", "text default ''"],
+    ["precio_paquete", "numeric(12,2) default 0"], ["estado_pedido", "text default 'Registrado'"],
+    ["fecha_registro", "text default ''"], ["fecha_entrega", "text default ''"], ["observaciones", "text default ''"],
+    ["codigos", "jsonb default '{}'::jsonb"], ["extra", "jsonb default '{}'::jsonb"],
+  ] },
+  { tabla: "pagos", columnas: [
+    ["id", "text primary key"], ["estudiante_id", "text references estudiantes(id) on delete cascade"],
+    ["fecha", "text default ''"], ["monto", "numeric(12,2) default 0"], ["metodo", "text default ''"],
+    ["bs", "boolean default false"], ["tasa", "numeric(12,2) default 0"], ["usd", "numeric(12,2) default 0"],
+    ["referencia", "text default ''"], ["observacion", "text default ''"],
+  ] },
+  { tabla: "adicionales_items", columnas: [
+    ["id", "text primary key"], ["estudiante_id", "text references estudiantes(id) on delete cascade"],
+    ["producto", "text default ''"], ["cantidad", "int default 1"], ["precio", "numeric(12,2) default 0"], ["talla", "text default ''"],
+  ] },
+  { tabla: "cotizaciones", columnas: [
+    ["id", "text primary key"], ["numero", "text default ''"], ["fecha", "text default ''"], ["cliente", "text default ''"],
+    ["telefono", "text default ''"], ["escuela", "text default ''"], ["paquete_id", "text default ''"],
+    ["estado", "text default 'Pendiente'"], ["nota", "text default ''"],
+  ] },
+  { tabla: "cotizacion_items", columnas: [
+    ["id", "text primary key"], ["cotizacion_id", "text references cotizaciones(id) on delete cascade"],
+    ["producto", "text default ''"], ["cantidad", "int default 1"], ["precio", "numeric(12,2) default 0"], ["talla", "text default ''"],
+  ] },
+  { tabla: "sesiones", columnas: [
+    ["id", "text primary key"], ["escuela_id", "text references escuelas(id)"], ["fecha", "text default ''"],
+    ["hora", "text default ''"], ["fotografo", "text default ''"], ["estado", "text default 'Agendada'"],
+    ["fotos", "int default 0"], ["nota", "text default ''"],
+  ] },
+  { tabla: "eventos", columnas: [
+    ["id", "text primary key"], ["fecha", "text default ''"], ["hora", "text default ''"],
+    ["titulo", "text default ''"], ["tipo", "text default 'otro'"], ["escuela_id", "text"],
+  ] },
+  { tabla: "mensajes", columnas: [
+    ["id", "text primary key"], ["fecha", "text default ''"], ["destinatario", "text default ''"],
+    ["telefono", "text default ''"], ["plantilla", "text default ''"], ["texto", "text default ''"],
+  ] },
+  { tabla: "usuarios", columnas: [
+    ["id", "text primary key"], ["nombre", "text default ''"], ["usuario", "text default ''"],
+    ["rol", "text default 'operador'"], ["activo", "boolean default true"],
+  ] },
+  { tabla: "historial_tasas", columnas: [
+    ["id", "text primary key"], ["fecha", "text default ''"], ["usd", "numeric(12,4) default 0"],
+    ["euro", "numeric(12,4) default 0"], ["paralelo", "numeric(12,4) default 0"],
+    ["fuente", "text default 'dolarapi'"], ["actualizado", "bigint default 0"],
+  ] },
+  { tabla: "paquetes_escuelas", columnas: [
+    ["id", "text primary key"], ["escuela_id", "text references escuelas(id)"], ["nombre", "text default ''"],
+    ["tipo_paquete_id", "text default ''"], ["precio", "numeric(12,2) default 0"],
+    ["articulos", "jsonb default '[]'::jsonb"], ["nota", "text default ''"], ["activo", "boolean default true"], ["creado", "text default ''"],
+  ] },
+  { tabla: "configuracion", columnas: [
+    ["id", "text primary key"], ["data", "jsonb default '{}'::jsonb"], ["seq_pedido", "int default 1"],
+    ["seq_cot", "int default 1"], ["current_user_id", "text default ''"],
+  ] },
+  { tabla: "facturas", columnas: [
+    ["id", "text primary key"], ["numero", "text default ''"], ["estudiante_id", "text default ''"],
+    ["estudiante", "text default ''"], ["fecha", "text default ''"], ["total", "numeric(12,2) default 0"], ["accion", "text default ''"],
+  ] },
+  { tabla: "tarjetas_qr", columnas: [
+    ["id", "text primary key"], ["fecha", "text default ''"], ["estudiante_id", "text default ''"],
+    ["estudiante", "text default ''"], ["accion", "text default ''"], ["lote", "text default ''"],
+  ] },
+  { tabla: "escaneos_ocr", columnas: [
+    ["id", "text primary key"], ["fecha", "text default ''"], ["motor", "text default ''"],
+    ["ok", "boolean default false"], ["nombres", "text default ''"], ["apellidos", "text default ''"], ["ci", "text default ''"],
+  ] },
+  { tabla: "registros_produccion", columnas: [
+    ["id", "text primary key"], ["fecha", "text default ''"], ["detalle", "text default ''"],
+    ["materiales", "int default 0"], ["pedidos", "int default 0"],
+  ] },
+];
+
+/* ============================================================
+   ESQUEMA COMPLETO SIN ERRORES — script único y garantizado.
+   • Crea las 18 tablas si no existen
+   • Repara columnas faltantes (ej. "extra" en estudiantes)
+   • Recrea políticas RLS sin conflicto (drop + create)
+   • Activa el tiempo real solo si falta
+   • NUNCA borra datos · ejecutable las veces que quieras
+   ============================================================ */
+const _tipoAlter = (def: string) =>
+  def
+    .replace(/\s*primary key/i, "")
+    .replace(/\s*not null/i, "")
+    .replace(/\s*references\s+\w+\s*\(\w+\)(\s*on delete cascade)?/i, "");
+
+export const SUPABASE_SCHEMA_SEGURO = (() => {
+  const p: string[] = [];
+  p.push("-- ═══════════════════════════════════════════════════════════");
+  p.push("-- CRM PROMOCIONES JyG — ESQUEMA COMPLETO · 18 TABLAS");
+  p.push("-- ✅ GARANTIZADO SIN ERRORES: ejecútalo las veces que quieras.");
+  p.push("--    Crea lo que falta, repara columnas y no borra datos.");
+  p.push("-- 📋 Instrucciones:");
+  p.push("--    1) Supabase → SQL Editor → New query");
+  p.push("--    2) Pega TODO este script");
+  p.push("--    3) Pulsa Run");
+  p.push("--    4) En el CRM: Integraciones → \"Verificar ahora\"");
+  p.push("-- ═══════════════════════════════════════════════════════════");
+  p.push("");
+  for (const t of ESQUEMA_TABLAS) {
+    p.push(`-- ── ${t.tabla} ${"─".repeat(Math.max(4, 40 - t.tabla.length))}`);
+    p.push(`create table if not exists ${t.tabla} (`);
+    p.push(t.columnas.map(([n, d]) => `  ${n} ${d}`).join(",\n"));
+    p.push(");");
+    for (const [n, d] of t.columnas) {
+      if (n === "id") continue;
+      p.push(`alter table ${t.tabla} add column if not exists ${n} ${_tipoAlter(d)};`);
+    }
+    p.push(`alter table ${t.tabla} enable row level security;`);
+    p.push(`drop policy if exists "crm_all" on ${t.tabla};`);
+    p.push(`create policy "crm_all" on ${t.tabla} for all using (true) with check (true);`);
+    p.push(`do $$ begin`);
+    p.push(`  if not exists (select 1 from pg_publication_tables where pubname = 'supabase_realtime' and tablename = '${t.tabla}') then`);
+    p.push(`    alter publication supabase_realtime add table ${t.tabla};`);
+    p.push(`  end if;`);
+    p.push(`end $$;`);
+    p.push("");
+  }
+  p.push("-- ═══ LISTO ═══");
+  p.push("-- Las 18 tablas están creadas, con RLS y tiempo real activos.");
+  p.push("-- En el CRM pulsa \"Verificar ahora\" y luego \"Subir base completa\".");
+  return p.join("\n");
+})();
 export const SUPABASE_SQL = `-- Esquema CRM Promociones JyG · una tabla por módulo
 create table if not exists escuelas (
   id text primary key, nombre text not null, director text default '', telefono text default '',
@@ -405,7 +557,234 @@ create policy "crm_all" on mensajes for all using (true) with check (true);
 create policy "crm_all" on usuarios for all using (true) with check (true);
 create policy "crm_all" on historial_tasas for all using (true) with check (true);
 create policy "crm_all" on paquetes_escuelas for all using (true) with check (true);
-create policy "crm_all" on configuracion for all using (true) with check (true);`;
+create policy "crm_all" on configuracion for all using (true) with check (true);
+
+-- Tablas de registro por módulo (18 en total)
+create table if not exists facturas (
+  id text primary key, numero text default '', estudiante_id text default '', estudiante text default '',
+  fecha text default '', total numeric(12,2) default 0, accion text default ''
+);
+create table if not exists tarjetas_qr (
+  id text primary key, fecha text default '', estudiante_id text default '', estudiante text default '',
+  accion text default '', lote text default ''
+);
+create table if not exists escaneos_ocr (
+  id text primary key, fecha text default '', motor text default '', ok boolean default false,
+  nombres text default '', apellidos text default '', ci text default ''
+);
+create table if not exists registros_produccion (
+  id text primary key, fecha text default '', detalle text default '', materiales int default 0, pedidos int default 0
+);
+alter table facturas enable row level security;
+alter table tarjetas_qr enable row level security;
+alter table escaneos_ocr enable row level security;
+alter table registros_produccion enable row level security;
+create policy "crm_all" on facturas for all using (true) with check (true);
+create policy "crm_all" on tarjetas_qr for all using (true) with check (true);
+create policy "crm_all" on escaneos_ocr for all using (true) with check (true);
+create policy "crm_all" on registros_produccion for all using (true) with check (true);
+
+-- ═══════════════════════════════════════════════════════════
+-- TIEMPO REAL: permite que el CRM lea los cambios al instante.
+-- Ejecuta cada línea por separado (si una ya existe, ignora el error y sigue).
+-- ═══════════════════════════════════════════════════════════
+alter publication supabase_realtime add table escuelas;
+alter publication supabase_realtime add table docentes;
+alter publication supabase_realtime add table estudiantes;
+alter publication supabase_realtime add table pagos;
+alter publication supabase_realtime add table adicionales_items;
+alter publication supabase_realtime add table cotizaciones;
+alter publication supabase_realtime add table cotizacion_items;
+alter publication supabase_realtime add table sesiones;
+alter publication supabase_realtime add table eventos;
+alter publication supabase_realtime add table mensajes;
+alter publication supabase_realtime add table usuarios;
+alter publication supabase_realtime add table historial_tasas;
+alter publication supabase_realtime add table paquetes_escuelas;
+alter publication supabase_realtime add table configuracion;
+alter publication supabase_realtime add table facturas;
+alter publication supabase_realtime add table tarjetas_qr;
+alter publication supabase_realtime add table escaneos_ocr;
+alter publication supabase_realtime add table registros_produccion;`;
+
+/* ============================================================
+   MIGRACIONES — para proyectos cuyas tablas se crearon con un
+   esquema anterior (ej. falta la columna "extra" en estudiantes).
+   Seguras de ejecutar varias veces: no tocan datos existentes.
+   ============================================================ */
+export const MIGRACIONES_SQL = `-- MIGRACIÓN CRM JyG — agrega columnas nuevas SIN borrar datos.
+-- Ejecutar TODO el bloque en SQL Editor (es seguro repetirlo).
+
+alter table estudiantes add column if not exists extra jsonb default '{}'::jsonb;
+alter table estudiantes add column if not exists codigos jsonb default '{}'::jsonb;
+alter table estudiantes add column if not exists fecha_entrega text default '';
+alter table estudiantes add column if not exists observaciones text default '';
+alter table estudiantes add column if not exists representante text default '';
+alter table estudiantes add column if not exists ci text default '';
+alter table estudiantes add column if not exists precio_paquete numeric(12,2) default 0;
+
+alter table escuelas add column if not exists anio_escolar text default '';
+alter table escuelas add column if not exists observaciones text default '';
+
+alter table docentes add column if not exists correo text default '';
+alter table docentes add column if not exists observaciones text default '';
+
+alter table pagos add column if not exists bs boolean default false;
+alter table pagos add column if not exists tasa numeric(12,2) default 0;
+alter table pagos add column if not exists usd numeric(12,2) default 0;
+alter table pagos add column if not exists referencia text default '';
+alter table pagos add column if not exists observacion text default '';
+
+alter table sesiones add column if not exists fotos int default 0;
+alter table sesiones add column if not exists nota text default '';
+
+alter table historial_tasas add column if not exists euro numeric(12,4) default 0;
+alter table historial_tasas add column if not exists paralelo numeric(12,4) default 0;
+alter table historial_tasas add column if not exists fuente text default 'dolarapi';
+alter table historial_tasas add column if not exists actualizado bigint default 0;
+
+alter table paquetes_escuelas add column if not exists articulos jsonb default '[]'::jsonb;
+alter table paquetes_escuelas add column if not exists activo boolean default true;
+alter table paquetes_escuelas add column if not exists creado text default '';
+
+alter table configuracion add column if not exists data jsonb default '{}'::jsonb;
+alter table configuracion add column if not exists seq_pedido int default 1;
+alter table configuracion add column if not exists seq_cot int default 1;
+alter table configuracion add column if not exists current_user_id text default '';
+
+-- Si alguna tabla no existe, créala (no afecta a las existentes):
+create table if not exists adicionales_items (
+  id text primary key, estudiante_id text references estudiantes(id) on delete cascade,
+  producto text default '', cantidad int default 1, precio numeric(12,2) default 0, talla text default ''
+);
+create table if not exists cotizacion_items (
+  id text primary key, cotizacion_id text references cotizaciones(id) on delete cascade,
+  producto text default '', cantidad int default 1, precio numeric(12,2) default 0, talla text default ''
+);
+
+-- Habilitar RLS y políticas si faltan:
+alter table adicionales_items enable row level security;
+alter table cotizacion_items enable row level security;
+drop policy if exists "crm_all" on adicionales_items;
+drop policy if exists "crm_all" on cotizacion_items;
+create policy "crm_all" on adicionales_items for all using (true) with check (true);
+create policy "crm_all" on cotizacion_items for all using (true) with check (true);
+
+-- Tablas de registro por módulo (se crean solo si faltan):
+create table if not exists facturas (
+  id text primary key, numero text default '', estudiante_id text default '', estudiante text default '',
+  fecha text default '', total numeric(12,2) default 0, accion text default ''
+);
+create table if not exists tarjetas_qr (
+  id text primary key, fecha text default '', estudiante_id text default '', estudiante text default '',
+  accion text default '', lote text default ''
+);
+create table if not exists escaneos_ocr (
+  id text primary key, fecha text default '', motor text default '', ok boolean default false,
+  nombres text default '', apellidos text default '', ci text default ''
+);
+create table if not exists registros_produccion (
+  id text primary key, fecha text default '', detalle text default '', materiales int default 0, pedidos int default 0
+);
+alter table facturas enable row level security;
+alter table tarjetas_qr enable row level security;
+alter table escaneos_ocr enable row level security;
+alter table registros_produccion enable row level security;
+drop policy if exists "crm_all" on facturas;
+drop policy if exists "crm_all" on tarjetas_qr;
+drop policy if exists "crm_all" on escaneos_ocr;
+drop policy if exists "crm_all" on registros_produccion;
+create policy "crm_all" on facturas for all using (true) with check (true);
+create policy "crm_all" on tarjetas_qr for all using (true) with check (true);
+create policy "crm_all" on escaneos_ocr for all using (true) with check (true);
+create policy "crm_all" on registros_produccion for all using (true) with check (true);
+
+-- Tiempo real (ejecutar el bloque; ignorar las líneas que digan "ya existe"):
+alter publication supabase_realtime add table escuelas;
+alter publication supabase_realtime add table docentes;
+alter publication supabase_realtime add table estudiantes;
+alter publication supabase_realtime add table pagos;
+alter publication supabase_realtime add table adicionales_items;
+alter publication supabase_realtime add table cotizaciones;
+alter publication supabase_realtime add table cotizacion_items;
+alter publication supabase_realtime add table sesiones;
+alter publication supabase_realtime add table eventos;
+alter publication supabase_realtime add table mensajes;
+alter publication supabase_realtime add table usuarios;
+alter publication supabase_realtime add table historial_tasas;
+alter publication supabase_realtime add table paquetes_escuelas;
+alter publication supabase_realtime add table configuracion;
+alter publication supabase_realtime add table facturas;
+alter publication supabase_realtime add table tarjetas_qr;
+alter publication supabase_realtime add table escaneos_ocr;
+alter publication supabase_realtime add table registros_produccion;`;
+
+/* ============================================================
+   CONFIGURACIÓN COMPLETA (desde cero) — un solo script idempotente.
+   Crea las 18 tablas, RLS, políticas y tiempo real. Seguro de
+   ejecutar varias veces: no borra datos y no falla si ya existe.
+   ============================================================ */
+const _policyIdem = (linea: string) => {
+  const m = linea.match(/^create policy "crm_all" on (\w+)/);
+  if (!m) return linea;
+  return `drop policy if exists "crm_all" on ${m[1]};\n${linea}`;
+};
+const _realtimeIdem = (t: string) =>
+  `do $$ begin\n  if not exists (select 1 from pg_publication_tables where pubname='supabase_realtime' and tablename='${t}') then\n    alter publication supabase_realtime add table ${t};\n  end if;\nend $$;`;
+
+export const SUPABASE_SETUP_SQL = (() => {
+  const cuerpo = SUPABASE_SQL
+    .split("\n")
+    .map((l) => {
+      const t = l.trim();
+      if (t.startsWith('create policy "crm_all"')) return _policyIdem(t);
+      if (t.startsWith("alter publication supabase_realtime add table")) return "";
+      return l;
+    })
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n");
+  const realtime = DB_TABLES.map((x) => _realtimeIdem(x.tabla)).join("\n");
+  return (
+    "-- ═══════════════════════════════════════════════════════════\n" +
+    "-- CRM PROMOCIONES JyG — CONFIGURACIÓN COMPLETA DE SUPABASE\n" +
+    "-- Un solo script para configurar el proyecto DESDE CERO.\n" +
+    "-- También es seguro ejecutarlo sobre un proyecto existente:\n" +
+    "-- no borra datos y no falla si algo ya está creado.\n" +
+    "-- Pegar TODO en: Supabase → SQL Editor → New query → Run\n" +
+    "-- ═══════════════════════════════════════════════════════════\n\n" +
+    cuerpo +
+    "\n\n-- ═══ TIEMPO REAL (lectura en vivo desde el CRM) ═══\n" +
+    realtime +
+    "\n\n-- ═══ LISTO ═══\n-- Ahora copia la URL del proyecto y la anon key en el CRM:\n-- Integraciones → 1 · Conectar el proyecto Supabase\n"
+  );
+})();
+
+/* ============================================================
+   SQL enfocado: crea SOLO las tablas que faltan en Supabase.
+   Se genera dinámicamente a partir de la lista de faltantes
+   detectada por la verificación de conexión.
+   ============================================================ */
+export function sqlParaTablasFaltantes(faltantes: string[]): string {
+  if (!faltantes.length) return "";
+  const bloques: string[] = [];
+  for (const t of faltantes) {
+    const re = new RegExp(`create table if not exists ${t} \\([\\s\\S]*?\\);`, "m");
+    const m = SUPABASE_SQL.match(re);
+    if (m) bloques.push(m[0]);
+    bloques.push(`alter table ${t} enable row level security;`);
+    bloques.push(`drop policy if exists "crm_all" on ${t};`);
+    bloques.push(`create policy "crm_all" on ${t} for all using (true) with check (true);`);
+    bloques.push(_realtimeIdem(t));
+    bloques.push("");
+  }
+  return (
+    `-- SQL para crear SOLO las ${faltantes.length} tablas que faltan en tu Supabase:\n` +
+    `-- ${faltantes.join(", ")}\n` +
+    `-- Pegar en: Supabase → SQL Editor → New query → Run\n` +
+    `-- No afecta tus datos existentes.\n\n` +
+    bloques.join("\n")
+  );
+}
 
 /* ============================================================
    SEMILLAS
@@ -470,7 +849,11 @@ export const SEED_CONFIG: Config = {
   empresa: { nombre: "Promociones JyG", rif: "J-40123456-7", direccion: "Av. Bolívar, Centro Comercial Plaza, Local 12, Valencia", telefono: "0414-555.00.00" },
   preciosPaquetes: [20, 22, 28, 30, 35, 40, 45, 48, 55, 60, 80, 110, 145],
   usarApi: true, usarTasaManual: false, tasaFallback: 352.4, tasaManualUSD: 352.4, tasaManualEUR: 384.1,
-  historialAuto: true, supabaseUrl: "", supabaseKey: "", autoSyncCloud: false,
+  historialAuto: true,
+  /* Conexión Supabase del equipo JyG (clave pública de publicación — segura en el cliente) */
+  supabaseUrl: "https://vvbvfvdjlmyujbpeorpn.supabase.co",
+  supabaseKey: "sb_publishable_n__jpo0Rdx5q9a-MY6NqrQ_SKyp4NCN",
+  autoSyncCloud: true,
   /* La API key se configura desde Configuración y se guarda en Supabase (nunca en el código) */
   openRouterKey: "", openRouterModel: OPENROUTER_MODELOS[0].id,
 };

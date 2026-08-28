@@ -5,8 +5,9 @@ import {
   codigosCompletos, estudianteTotales, todayISO, uid,
 } from "./data";
 import type {
-  Config, Cotizacion, CRMData, Docente, Escuela, Estudiante, Evento, HistorialTasa,
-  MensajeLog, OcrDraft, PaqueteEscuela, Pago, Rol, Route, Sesion, Usuario,
+  Config, Cotizacion, CRMData, Docente, Escuela, EscaneoLog, Estudiante, Evento, FacturaLog,
+  HistorialTasa, MensajeLog, OcrDraft, PaqueteEscuela, Pago, ProduccionLog, Rol, Route,
+  Sesion, TarjetaLog, Usuario,
 } from "./data";
 export type { Route, Rol };
 
@@ -17,6 +18,7 @@ const seedDB = (): DB => ({
   cotizaciones: SEED_COTIZACIONES, sesiones: SEED_SESIONES, eventos: SEED_EVENTOS,
   mensajes: [], usuarios: SEED_USUARIOS, historialTasas: SEED_HISTORIAL,
   paquetesEscuelas: SEED_PAQUETES_ESCUELAS, config: SEED_CONFIG,
+  facturas: [], tarjetas: [], escaneos: [], produccionLogs: [],
   currentUserId: "u1", seqPedido: 2411, seqCot: 2403,
 });
 const loadDB = (): DB => {
@@ -25,7 +27,11 @@ const loadDB = (): DB => {
     if (!raw) return seedDB();
     const d = JSON.parse(raw);
     const base = seedDB();
-    return { ...base, ...d, config: { ...base.config, ...(d.config || {}) } };
+    const cfg = { ...base.config, ...(d.config || {}) };
+    /* Garantiza la conexión Supabase aunque el navegador tuviera credenciales vacías guardadas */
+    if (!cfg.supabaseUrl) cfg.supabaseUrl = base.config.supabaseUrl;
+    if (!cfg.supabaseKey) cfg.supabaseKey = base.config.supabaseKey;
+    return { ...base, ...d, config: cfg };
   } catch { return seedDB(); }
 };
 
@@ -57,11 +63,18 @@ interface Ctx {
   setConfig: (patch: Partial<Config>) => void;
   deleteTasaHistorial: (id: string) => void; clearTasaHistorial: () => void;
   savePaqueteEscuela: (p: PaqueteEscuela) => void; deletePaqueteEscuela: (id: string) => void;
+  logFactura: (f: Omit<FacturaLog, "id" | "fecha">) => void;
+  logTarjeta: (t: Omit<TarjetaLog, "id" | "fecha">) => void;
+  logEscaneo: (s: Omit<EscaneoLog, "id" | "fecha">) => void;
+  logProduccion: (r: Omit<ProduccionLog, "id" | "fecha">) => void;
   exportBackup: () => string; importBackup: (json: string) => boolean;
-  testCloud: (url?: string, key?: string) => Promise<{ tablas: number; filas: number }>;
+  testCloud: (url?: string, key?: string) => Promise<{ tablas: number; filas: number; faltantes: string[] }>;
   syncToCloud: (onTabla?: (t: string, s: "busy" | "ok" | "err", f?: number) => void) => Promise<boolean>;
   restoreFromCloud: () => Promise<boolean>;
   syncInfo: { last: number; ok: boolean; msg: string } | null; syncing: boolean;
+  rtEstado: "off" | "on" | "error";
+  cloudStatus: { ok: boolean; tablas: number; filas: number; last: number; faltantes: string[] } | null;
+  testCloudNow: () => Promise<void>;
   alerts: { key: string; title: string; desc: string; route: Route }[];
 }
 
@@ -96,6 +109,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const confirmResolve = useRef<((v: boolean) => void) | null>(null);
   const dbRef = useRef(db);
   dbRef.current = db;
+  /* Control de sincronización con la nube */
+  const cloudReady = useRef(false);      /* se activa tras la carga inicial */
+  const applyingRemote = useRef(false);  /* evita bucles: no re-subir lo que llegó de la nube */
+  const rtTimer = useRef<any>(null);     /* debounce de eventos de tiempo real */
+  const [rtEstado, setRtEstado] = useState<"off" | "on" | "error">("off");
+  const [cloudStatus, setCloudStatus] = useState<{ ok: boolean; tablas: number; filas: number; last: number; faltantes: string[] } | null>(null);
 
   /* Persistencia */
   useEffect(() => {
@@ -121,10 +140,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => { void refreshTasa(); }, [refreshTasa]);
   useEffect(() => { const iv = setInterval(() => void refreshTasa(), 5 * 60 * 1000); return () => clearInterval(iv); }, [refreshTasa]);
 
-  /* Auto-sincronización con Supabase */
+  /* Auto-sincronización INSTANTÁNEA con Supabase (cada cambio local, con un
+     debounce mínimo para agrupar mutaciones rápidas). No se ejecuta durante
+     la carga inicial ni al aplicar datos que llegaron de la nube. */
   useEffect(() => {
+    if (!cloudReady.current || applyingRemote.current) return;
     if (!db.config.autoSyncCloud || !db.config.supabaseUrl || !db.config.supabaseKey) return;
-    const t = setTimeout(() => { void syncToCloud(); }, 2500);
+    const t = setTimeout(() => { void syncToCloud(); }, 600);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [db]);
@@ -197,6 +219,20 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const clearTasaHistorial = useCallback(() => mutate((d) => ({ ...d, historialTasas: [] })), [mutate]);
   const savePaqueteEscuela = useCallback((p: PaqueteEscuela) => mutate((d) => ({ ...d, paquetesEscuelas: upsert(d.paquetesEscuelas, p) })), [mutate]);
   const deletePaqueteEscuela = useCallback((id: string) => mutate((d) => ({ ...d, paquetesEscuelas: d.paquetesEscuelas.filter((x) => x.id !== id) })), [mutate]);
+
+  /* ---- Registro por módulo (una tabla por módulo, sincronizado a Supabase) ---- */
+  const logFactura = useCallback((f: Omit<FacturaLog, "id" | "fecha">) => mutate((d) => ({
+    ...d, facturas: [{ id: uid(), fecha: new Date().toISOString().slice(0, 10), ...f }, ...d.facturas].slice(0, 300),
+  })), [mutate]);
+  const logTarjeta = useCallback((t: Omit<TarjetaLog, "id" | "fecha">) => mutate((d) => ({
+    ...d, tarjetas: [{ id: uid(), fecha: new Date().toISOString().slice(0, 10), ...t }, ...d.tarjetas].slice(0, 300),
+  })), [mutate]);
+  const logEscaneo = useCallback((s: Omit<EscaneoLog, "id" | "fecha">) => mutate((d) => ({
+    ...d, escaneos: [{ id: uid(), fecha: new Date().toISOString().slice(0, 10), ...s }, ...d.escaneos].slice(0, 300),
+  })), [mutate]);
+  const logProduccion = useCallback((r: Omit<ProduccionLog, "id" | "fecha">) => mutate((d) => ({
+    ...d, produccionLogs: [{ id: uid(), fecha: new Date().toISOString().slice(0, 10), ...r }, ...d.produccionLogs].slice(0, 300),
+  })), [mutate]);
   const setRolPermisos = useCallback((rol: Rol, rutas: string[]) => mutate((d) => ({
     ...d, config: { ...d.config, rolesPermisos: { ...(d.config.rolesPermisos || {}), [rol]: rutas } as Record<Rol, string[]> },
   })), [mutate]);
@@ -228,20 +264,59 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const { probarConexion } = await import("./supabase");
     return probarConexion(client);
   }, [clienteSb]);
+  /* Verificación de conexión silenciosa: mantiene el estado "Conectado" siempre actualizado */
+  const testCloudNow = useCallback(async () => {
+    const { supabaseUrl, supabaseKey } = dbRef.current.config;
+    if (!supabaseUrl || !supabaseKey) { setCloudStatus(null); return; }
+    try {
+      const r = await testCloud(supabaseUrl, supabaseKey);
+      setCloudStatus({ ok: true, tablas: r.tablas, filas: r.filas, faltantes: r.faltantes, last: Date.now() });
+    } catch {
+      setCloudStatus({ ok: false, tablas: 0, filas: 0, faltantes: [], last: Date.now() });
+    }
+  }, [testCloud]);
+  /* Al abrir el CRM verifica la conexión y la re-verifica cada minuto */
+  useEffect(() => {
+    void testCloudNow();
+    const iv = setInterval(() => void testCloudNow(), 60 * 1000);
+    return () => clearInterval(iv);
+  }, [testCloudNow]);
   const syncToCloud = useCallback(async (onTabla?: (t: string, s: "busy" | "ok" | "err", f?: number) => void) => {
     const client = await clienteSb();
     if (!client) { setSyncInfo({ last: Date.now(), ok: false, msg: "Configura la URL y la anon key de Supabase en Integraciones" }); return false; }
     setSyncing(true);
     try {
       const { subirTodo } = await import("./supabase");
-      await subirTodo(client, dbRef.current, onTabla);
-      setSyncInfo({ last: Date.now(), ok: true, msg: "Base de datos subida a Supabase (14 tablas)" });
-      return true;
+      const { fallos, faltantes } = await subirTodo(client, dbRef.current, onTabla);
+      if (fallos.length === 0) {
+        setSyncInfo({
+          last: Date.now(), ok: true,
+          msg: faltantes.length === 0
+            ? "Base de datos subida a Supabase (18 tablas)"
+            : `Subida correcta · ${18 - faltantes.length}/18 tablas · faltan: ${faltantes.join(", ")}`,
+        });
+        void testCloudNow();
+        return true;
+      }
+      setSyncInfo({
+        last: Date.now(), ok: false,
+        msg: `Subida parcial — fallaron: ${fallos.map((f) => f.tabla).join(", ")}`,
+      });
+      return false;
     } catch (e: any) {
       setSyncInfo({ last: Date.now(), ok: false, msg: "Error al subir: " + (e?.message || "desconocido") });
       return false;
     } finally { setSyncing(false); }
   }, [clienteSb]);
+  /* Mezcla los datos de la nube con la configuración local (preserva credenciales de conexión) */
+  const aplicarNube = useCallback((nuevo: DB) => {
+    setDb((d) => ({
+      ...nuevo,
+      config: { ...nuevo.config, supabaseUrl: d.config.supabaseUrl, supabaseKey: d.config.supabaseKey, autoSyncCloud: d.config.autoSyncCloud },
+      currentUserId: d.currentUserId,
+    }));
+  }, []);
+
   const restoreFromCloud = useCallback(async () => {
     const client = await clienteSb();
     if (!client) { setSyncInfo({ last: Date.now(), ok: false, msg: "Configura la URL y la anon key de Supabase" }); return false; }
@@ -250,14 +325,77 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       const { descargarTodo, rowsToDb } = await import("./supabase");
       const rows = await descargarTodo(client);
       const nuevo = rowsToDb(rows, dbRef.current);
-      setDb({ ...seedDB(), ...nuevo });
+      aplicarNube(nuevo);
       setSyncInfo({ last: Date.now(), ok: true, msg: "Base de datos restaurada desde Supabase" });
       return true;
     } catch (e: any) {
       setSyncInfo({ last: Date.now(), ok: false, msg: "Error al restaurar: " + (e?.message || "desconocido") });
       return false;
     } finally { setSyncing(false); }
-  }, [clienteSb]);
+  }, [clienteSb, aplicarNube]);
+
+  /* ── Carga inicial: si la nube tiene datos, ganan; si está vacía, se sube la base local ── */
+  useEffect(() => {
+    let cancelado = false;
+    (async () => {
+      const cfg = dbRef.current.config;
+      if (cfg.supabaseUrl && cfg.supabaseKey) {
+        try {
+          const client = await clienteSb();
+          if (client) {
+            const { descargarTodo, rowsToDb } = await import("./supabase");
+            const rows = await descargarTodo(client);
+            if (!cancelado) {
+              applyingRemote.current = true;
+              aplicarNube(rowsToDb(rows, dbRef.current));
+              setSyncInfo({ last: Date.now(), ok: true, msg: "Datos leídos de Supabase al iniciar" });
+              setTimeout(() => { applyingRemote.current = false; }, 800);
+            }
+          }
+        } catch {
+          /* Nube vacía o sin tablas → publicar la base local por primera vez */
+          if (!cancelado) await syncToCloud();
+        }
+      }
+      if (!cancelado) cloudReady.current = true;
+    })();
+    return () => { cancelado = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  /* ── Tiempo real: los cambios hechos en otro dispositivo se reflejan al instante ── */
+  useEffect(() => {
+    let channel: any = null;
+    (async () => {
+      const cfg = dbRef.current.config;
+      if (!cfg.supabaseUrl || !cfg.supabaseKey) return;
+      try {
+        const { sbClient } = await import("./supabase");
+        const client = sbClient(cfg.supabaseUrl, cfg.supabaseKey);
+        channel = client.channel("jyg-tiempo-real");
+        channel.on("postgres_changes", { event: "*", schema: "public" }, () => {
+          if (applyingRemote.current) return;
+          clearTimeout(rtTimer.current);
+          rtTimer.current = setTimeout(async () => {
+            try {
+              const { descargarTodo, rowsToDb } = await import("./supabase");
+              const rows = await descargarTodo(client);
+              applyingRemote.current = true;
+              aplicarNube(rowsToDb(rows, dbRef.current));
+              setSyncInfo({ last: Date.now(), ok: true, msg: "Actualizado en tiempo real desde Supabase" });
+              setTimeout(() => { applyingRemote.current = false; }, 800);
+            } catch { /* noop */ }
+          }, 900);
+        });
+        channel.subscribe((status: string) => {
+          if (status === "SUBSCRIBED") setRtEstado("on");
+          if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") setRtEstado("error");
+        });
+      } catch { setRtEstado("error"); }
+    })();
+    return () => { clearTimeout(rtTimer.current); try { channel?.unsubscribe(); } catch { /* noop */ } };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const user = useMemo(() => db.usuarios.find((u) => u.id === db.currentUserId) || db.usuarios[0], [db.usuarios, db.currentUserId]);
   const setCurrentUser = useCallback((id: string) => setDb((d) => ({ ...d, currentUserId: id })), []);
@@ -293,7 +431,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     saveSesion, deleteSesion, saveEvento, deleteEvento,
     saveUsuario, deleteUsuario, setConfig, deleteTasaHistorial, clearTasaHistorial,
     savePaqueteEscuela, deletePaqueteEscuela,
-    exportBackup, importBackup, testCloud, syncToCloud, restoreFromCloud, syncInfo, syncing,
+    logFactura, logTarjeta, logEscaneo, logProduccion,
+    exportBackup, importBackup, testCloud, syncToCloud, restoreFromCloud, syncInfo, syncing, rtEstado,
+    cloudStatus, testCloudNow,
     alerts,
   };
   return <AppCtx.Provider value={value}>{children}</AppCtx.Provider>;
