@@ -337,6 +337,148 @@ export const DB_TABLES = [
   { tabla: "facturas", label: "Facturación" }, { tabla: "tarjetas_qr", label: "Tarjetas QR" },
   { tabla: "escaneos_ocr", label: "Escáner Inteligente" }, { tabla: "registros_produccion", label: "Producción" },
 ];
+
+/* ============================================================
+   ESQUEMA MAESTRO — definición de las 18 tablas (fuente única)
+   ============================================================ */
+const ESQUEMA_TABLAS: { tabla: string; columnas: [string, string][] }[] = [
+  { tabla: "escuelas", columnas: [
+    ["id", "text primary key"], ["nombre", "text not null"], ["director", "text default ''"],
+    ["telefono", "text default ''"], ["direccion", "text default ''"], ["estado", "text default ''"],
+    ["municipio", "text default ''"], ["anio_escolar", "text default ''"], ["observaciones", "text default ''"],
+  ] },
+  { tabla: "docentes", columnas: [
+    ["id", "text primary key"], ["nombre", "text not null"], ["telefono", "text default ''"],
+    ["escuela_id", "text references escuelas(id)"], ["correo", "text default ''"], ["observaciones", "text default ''"],
+  ] },
+  { tabla: "estudiantes", columnas: [
+    ["id", "text primary key"], ["pedido", "text not null"], ["nombre", "text not null"],
+    ["telefono", "text default ''"], ["representante", "text default ''"], ["ci", "text default ''"],
+    ["escuela_id", "text references escuelas(id)"], ["docente_id", "text references docentes(id)"],
+    ["grado", "text default ''"], ["seccion", "text default ''"], ["paquete_id", "text default ''"],
+    ["precio_paquete", "numeric(12,2) default 0"], ["estado_pedido", "text default 'Registrado'"],
+    ["fecha_registro", "text default ''"], ["fecha_entrega", "text default ''"], ["observaciones", "text default ''"],
+    ["codigos", "jsonb default '{}'::jsonb"], ["extra", "jsonb default '{}'::jsonb"],
+  ] },
+  { tabla: "pagos", columnas: [
+    ["id", "text primary key"], ["estudiante_id", "text references estudiantes(id) on delete cascade"],
+    ["fecha", "text default ''"], ["monto", "numeric(12,2) default 0"], ["metodo", "text default ''"],
+    ["bs", "boolean default false"], ["tasa", "numeric(12,2) default 0"], ["usd", "numeric(12,2) default 0"],
+    ["referencia", "text default ''"], ["observacion", "text default ''"],
+  ] },
+  { tabla: "adicionales_items", columnas: [
+    ["id", "text primary key"], ["estudiante_id", "text references estudiantes(id) on delete cascade"],
+    ["producto", "text default ''"], ["cantidad", "int default 1"], ["precio", "numeric(12,2) default 0"], ["talla", "text default ''"],
+  ] },
+  { tabla: "cotizaciones", columnas: [
+    ["id", "text primary key"], ["numero", "text default ''"], ["fecha", "text default ''"], ["cliente", "text default ''"],
+    ["telefono", "text default ''"], ["escuela", "text default ''"], ["paquete_id", "text default ''"],
+    ["estado", "text default 'Pendiente'"], ["nota", "text default ''"],
+  ] },
+  { tabla: "cotizacion_items", columnas: [
+    ["id", "text primary key"], ["cotizacion_id", "text references cotizaciones(id) on delete cascade"],
+    ["producto", "text default ''"], ["cantidad", "int default 1"], ["precio", "numeric(12,2) default 0"], ["talla", "text default ''"],
+  ] },
+  { tabla: "sesiones", columnas: [
+    ["id", "text primary key"], ["escuela_id", "text references escuelas(id)"], ["fecha", "text default ''"],
+    ["hora", "text default ''"], ["fotografo", "text default ''"], ["estado", "text default 'Agendada'"],
+    ["fotos", "int default 0"], ["nota", "text default ''"],
+  ] },
+  { tabla: "eventos", columnas: [
+    ["id", "text primary key"], ["fecha", "text default ''"], ["hora", "text default ''"],
+    ["titulo", "text default ''"], ["tipo", "text default 'otro'"], ["escuela_id", "text"],
+  ] },
+  { tabla: "mensajes", columnas: [
+    ["id", "text primary key"], ["fecha", "text default ''"], ["destinatario", "text default ''"],
+    ["telefono", "text default ''"], ["plantilla", "text default ''"], ["texto", "text default ''"],
+  ] },
+  { tabla: "usuarios", columnas: [
+    ["id", "text primary key"], ["nombre", "text default ''"], ["usuario", "text default ''"],
+    ["rol", "text default 'operador'"], ["activo", "boolean default true"],
+  ] },
+  { tabla: "historial_tasas", columnas: [
+    ["id", "text primary key"], ["fecha", "text default ''"], ["usd", "numeric(12,4) default 0"],
+    ["euro", "numeric(12,4) default 0"], ["paralelo", "numeric(12,4) default 0"],
+    ["fuente", "text default 'dolarapi'"], ["actualizado", "bigint default 0"],
+  ] },
+  { tabla: "paquetes_escuelas", columnas: [
+    ["id", "text primary key"], ["escuela_id", "text references escuelas(id)"], ["nombre", "text default ''"],
+    ["tipo_paquete_id", "text default ''"], ["precio", "numeric(12,2) default 0"],
+    ["articulos", "jsonb default '[]'::jsonb"], ["nota", "text default ''"], ["activo", "boolean default true"], ["creado", "text default ''"],
+  ] },
+  { tabla: "configuracion", columnas: [
+    ["id", "text primary key"], ["data", "jsonb default '{}'::jsonb"], ["seq_pedido", "int default 1"],
+    ["seq_cot", "int default 1"], ["current_user_id", "text default ''"],
+  ] },
+  { tabla: "facturas", columnas: [
+    ["id", "text primary key"], ["numero", "text default ''"], ["estudiante_id", "text default ''"],
+    ["estudiante", "text default ''"], ["fecha", "text default ''"], ["total", "numeric(12,2) default 0"], ["accion", "text default ''"],
+  ] },
+  { tabla: "tarjetas_qr", columnas: [
+    ["id", "text primary key"], ["fecha", "text default ''"], ["estudiante_id", "text default ''"],
+    ["estudiante", "text default ''"], ["accion", "text default ''"], ["lote", "text default ''"],
+  ] },
+  { tabla: "escaneos_ocr", columnas: [
+    ["id", "text primary key"], ["fecha", "text default ''"], ["motor", "text default ''"],
+    ["ok", "boolean default false"], ["nombres", "text default ''"], ["apellidos", "text default ''"], ["ci", "text default ''"],
+  ] },
+  { tabla: "registros_produccion", columnas: [
+    ["id", "text primary key"], ["fecha", "text default ''"], ["detalle", "text default ''"],
+    ["materiales", "int default 0"], ["pedidos", "int default 0"],
+  ] },
+];
+
+/* ============================================================
+   ESQUEMA COMPLETO SIN ERRORES — script único y garantizado.
+   • Crea las 18 tablas si no existen
+   • Repara columnas faltantes (ej. "extra" en estudiantes)
+   • Recrea políticas RLS sin conflicto (drop + create)
+   • Activa el tiempo real solo si falta
+   • NUNCA borra datos · ejecutable las veces que quieras
+   ============================================================ */
+const _tipoAlter = (def: string) =>
+  def
+    .replace(/\s*primary key/i, "")
+    .replace(/\s*not null/i, "")
+    .replace(/\s*references\s+\w+\s*\(\w+\)(\s*on delete cascade)?/i, "");
+
+export const SUPABASE_SCHEMA_SEGURO = (() => {
+  const p: string[] = [];
+  p.push("-- ═══════════════════════════════════════════════════════════");
+  p.push("-- CRM PROMOCIONES JyG — ESQUEMA COMPLETO · 18 TABLAS");
+  p.push("-- ✅ GARANTIZADO SIN ERRORES: ejecútalo las veces que quieras.");
+  p.push("--    Crea lo que falta, repara columnas y no borra datos.");
+  p.push("-- 📋 Instrucciones:");
+  p.push("--    1) Supabase → SQL Editor → New query");
+  p.push("--    2) Pega TODO este script");
+  p.push("--    3) Pulsa Run");
+  p.push("--    4) En el CRM: Integraciones → \"Verificar ahora\"");
+  p.push("-- ═══════════════════════════════════════════════════════════");
+  p.push("");
+  for (const t of ESQUEMA_TABLAS) {
+    p.push(`-- ── ${t.tabla} ${"─".repeat(Math.max(4, 40 - t.tabla.length))}`);
+    p.push(`create table if not exists ${t.tabla} (`);
+    p.push(t.columnas.map(([n, d]) => `  ${n} ${d}`).join(",\n"));
+    p.push(");");
+    for (const [n, d] of t.columnas) {
+      if (n === "id") continue;
+      p.push(`alter table ${t.tabla} add column if not exists ${n} ${_tipoAlter(d)};`);
+    }
+    p.push(`alter table ${t.tabla} enable row level security;`);
+    p.push(`drop policy if exists "crm_all" on ${t.tabla};`);
+    p.push(`create policy "crm_all" on ${t.tabla} for all using (true) with check (true);`);
+    p.push(`do $$ begin`);
+    p.push(`  if not exists (select 1 from pg_publication_tables where pubname = 'supabase_realtime' and tablename = '${t.tabla}') then`);
+    p.push(`    alter publication supabase_realtime add table ${t.tabla};`);
+    p.push(`  end if;`);
+    p.push(`end $$;`);
+    p.push("");
+  }
+  p.push("-- ═══ LISTO ═══");
+  p.push("-- Las 18 tablas están creadas, con RLS y tiempo real activos.");
+  p.push("-- En el CRM pulsa \"Verificar ahora\" y luego \"Subir base completa\".");
+  return p.join("\n");
+})();
 export const SUPABASE_SQL = `-- Esquema CRM Promociones JyG · una tabla por módulo
 create table if not exists escuelas (
   id text primary key, nombre text not null, director text default '', telefono text default '',

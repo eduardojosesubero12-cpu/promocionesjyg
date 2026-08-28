@@ -6,8 +6,8 @@ import {
 import { useApp } from "../lib/store";
 import type { CatAdicional, PaqueteEscuela, Rol, Usuario } from "../lib/data";
 import {
-  ACCESOS_DEFAULT, API_DOLARES, API_EUROS, DB_TABLES, MIGRACIONES_SQL, MODULOS_GRUPOS, OPENROUTER_MODELOS, ORDEN_MATERIALES,
-  PAQUETES, ROL_DESC, ROL_LABEL, ROLES_INFO, SUPABASE_SETUP_SQL, TODOS_MODULOS, sqlParaTablasFaltantes,
+  ACCESOS_DEFAULT, API_DOLARES, API_EUROS, DB_TABLES, MODULOS_GRUPOS, OPENROUTER_MODELOS, ORDEN_MATERIALES,
+  PAQUETES, ROL_DESC, ROL_LABEL, ROLES_INFO, SUPABASE_SCHEMA_SEGURO, TODOS_MODULOS,
   computeProduccion, downloadFile, estudianteTotales, fmtBs, fmtFecha, fmtFechaHoraViva, fmtHaceSegundos,
   fmtUSD, getAdicionales, getGrados, getSecciones, getTallas, toCSV, todayISO, uid,
 } from "../lib/data";
@@ -896,41 +896,6 @@ export function Integraciones() {
         ))}
       </div>
 
-      {/* Acción requerida: tablas faltantes — SQL auto-generado */}
-      {cloudStatus?.faltantes.length ? (
-        <div className="card p-3 p-md-4 mb-3" style={{ borderLeft: "4px solid var(--danger)", background: "color-mix(in srgb, var(--danger) 4%, var(--card-bg))" }}>
-          <SectionHead
-            title={<span className="d-flex align-items-center gap-2"><AlertTriangle size={17} style={{ color: "var(--danger)" }} /> Faltan {cloudStatus.faltantes.length} tablas en Supabase</span>}
-            desc="Copia el SQL generado abajo y ejecútalo una vez en SQL Editor. Es idempotente y no toca tus datos."
-            actions={<Badge tone="red" dot>Acción requerida</Badge>}
-          />
-          <div className="d-flex flex-wrap gap-1 mb-2">
-            {cloudStatus.faltantes.map((t) => <Badge key={t} tone="red" dot>{t}</Badge>)}
-          </div>
-          <div className="position-relative">
-            <pre className="p-3 rounded-3 overflow-auto" style={{ background: "#0d1524", color: "#a8c6e8", fontSize: 10.5, maxHeight: 260, fontFamily: "ui-monospace, Menlo, monospace" }}>
-              {sqlParaTablasFaltantes(cloudStatus.faltantes)}
-            </pre>
-            <button
-              className="btn btn-gold btn-xs position-absolute"
-              style={{ top: 10, right: 10 }}
-              onClick={() => { navigator.clipboard?.writeText(sqlParaTablasFaltantes(cloudStatus.faltantes)).then(() => toast(`SQL copiado (${cloudStatus.faltantes.length} tablas)`, "ok")).catch(() => undefined); }}
-            >
-              <Copy size={11} /> Copiar SQL
-            </button>
-          </div>
-          <div className="d-flex align-items-center gap-2 flex-wrap mt-3" style={{ fontSize: 12.5, color: "var(--ink-soft)" }}>
-            <span className="d-flex align-items-center justify-content-center rounded-3 flex-shrink-0" style={{ width: 30, height: 30, background: "var(--tint-danger)", color: "var(--danger)" }}><i className="bi bi-terminal" /></span>
-            <span style={{ flex: 1, minWidth: 220 }}>
-              <b>Supabase → SQL Editor → New query</b>, pega el SQL y pulsa <b>Run</b>. Después verifica aquí.
-            </span>
-            <button className="btn btn-primary btn-sm" onClick={() => { void testCloudNow(); toast("Verificando esquema…", "ok"); }}>
-              <i className="bi bi-arrow-clockwise" /> Verificar ahora
-            </button>
-          </div>
-        </div>
-      ) : null}
-
       <div className="row g-3">
         {/* Paso 1: conexión */}
         <div className="col-12 col-xl-6">
@@ -973,70 +938,85 @@ export function Integraciones() {
         {/* Paso 2: esquema */}
         <div className="col-12 col-xl-6">
           <div className="card p-3 p-md-4 h-100" style={{ borderLeft: "4px solid var(--jyg-gold)" }}>
-            <SectionHead title="2 · Crear el esquema SQL" desc="Una tabla por módulo (18 en total) — SQL Editor en Supabase" actions={
-              <button className="btn btn-soft btn-xs" onClick={() => setVerSql(!verSql)}>{verSql ? "Ocultar SQL" : "Ver SQL"}</button>
+            <SectionHead title="2 · Esquema SQL" desc="Estado de las 18 tablas en tu Supabase" actions={
+              cloudStatus?.faltantes.length
+                ? <Badge tone="red" dot>{18 - cloudStatus.faltantes.length}/18 tablas</Badge>
+                : cloudStatus?.ok ? <Badge tone="green" dot>18/18 tablas ✓</Badge> : <Badge tone="slate" dot>Sin verificar</Badge>
             } />
-            {verSql ? (
-              <div className="position-relative">
-                <pre className="p-3 rounded-3 overflow-auto" style={{ background: "#0d1524", color: "#a8c6e8", fontSize: 10.5, maxHeight: 220, fontFamily: "ui-monospace, Menlo, monospace" }}>{SUPABASE_SETUP_SQL}</pre>
-                <button className="btn btn-gold btn-xs position-absolute" style={{ top: 10, right: 10 }} onClick={() => { navigator.clipboard?.writeText(SUPABASE_SETUP_SQL).then(() => toast("Esquema SQL copiado (seguro de repetir)", "ok")).catch(() => undefined); }}><Copy size={11} /> Copiar</button>
-              </div>
-            ) : (
-              <div className="row g-2">
-                {DB_TABLES.map((t) => (
+            <div className="row g-2">
+              {DB_TABLES.map((t) => {
+                const falta = cloudStatus?.faltantes.includes(t.tabla);
+                return (
                   <div key={t.tabla} className="col-6 col-md-4">
-                    <div className="sb-table-item">
+                    <div className="sb-table-item" style={falta ? { outline: "1.5px solid var(--danger)", outlineOffset: -1 } : undefined}>
                       <span className="tname flex-grow-1 text-truncate">{t.tabla}</span>
                       {tabEstado[t.tabla] === "busy" && <span className="spin" style={{ color: "var(--warn)" }}><i className="bi bi-arrow-repeat" /></span>}
-                      {tabEstado[t.tabla] === "ok" && <Check size={13} style={{ color: "var(--ok)" }} />}
-                      {tabEstado[t.tabla] === "err" && <X size={13} style={{ color: "var(--danger)" }} />}
-                      {!tabEstado[t.tabla] && <span className="dot" style={{ background: "var(--line)", boxShadow: "none" }} />}
+                      {(tabEstado[t.tabla] === "ok" && !falta) && <Check size={13} style={{ color: "var(--ok)" }} />}
+                      {(tabEstado[t.tabla] === "err" || falta) && <X size={13} style={{ color: "var(--danger)" }} />}
+                      {!tabEstado[t.tabla] && !falta && <span className="dot" style={{ background: "var(--line)", boxShadow: "none" }} />}
                     </div>
                   </div>
-                ))}
-              </div>
-            )}
+                );
+              })}
+            </div>
+            <div className="d-flex align-items-center gap-2 flex-wrap mt-3">
+              <button className="btn btn-primary btn-sm" onClick={() => { void testCloudNow(); toast("Verificando esquema…", "ok"); }}>
+                <i className="bi bi-arrow-clockwise" /> Verificar ahora
+              </button>
+              <button className="btn btn-soft btn-sm" onClick={() => setVerSql(!verSql)}>
+                {verSql ? "Ocultar SQL" : "Ver SQL de migración"}
+              </button>
+            </div>
           </div>
         </div>
 
-        {/* Migración — para esquemas antiguos (tablas o columnas faltantes) */}
+        {/* Esquema completo sin errores — la acción principal */}
         <div className="col-12">
-          <div className="card p-3 p-md-4" style={{ borderLeft: `4px solid ${cloudStatus?.faltantes.length ? "var(--danger)" : "var(--warn)"}`, boxShadow: cloudStatus?.faltantes.length ? "0 0 0 3px color-mix(in srgb, var(--danger) 12%, transparent)" : undefined }}>
+          <div
+            className="card p-3 p-md-4"
+            style={{
+              borderLeft: `4px solid ${cloudStatus?.faltantes.length ? "var(--danger)" : "var(--ok)"}`,
+              boxShadow: cloudStatus?.faltantes.length ? "0 0 0 3px color-mix(in srgb, var(--danger) 12%, transparent)" : undefined,
+            }}
+          >
             <SectionHead
               title={cloudStatus?.faltantes.length
-                ? `Migración pendiente · faltan ${cloudStatus.faltantes.length} tabla(s): ${cloudStatus.faltantes.join(", ")}`
-                : "¿Error de columna al subir? · Ejecuta la migración"}
+                ? <span className="d-flex align-items-center gap-2"><AlertTriangle size={17} style={{ color: "var(--danger)" }} /> Faltan {cloudStatus.faltantes.length} tablas · ejecuta el esquema sin errores</span>
+                : "Esquema completo sin errores · 18 tablas"}
               desc={cloudStatus?.faltantes.length
-                ? "Tu Supabase tiene un esquema antiguo. Ejecuta el SQL de migración una vez para crear las tablas que faltan (no borra datos)."
-                : "Si tu Supabase se creó con un esquema anterior (ej. falta la columna 'extra' en estudiantes), este SQL agrega las columnas nuevas sin borrar datos"}
-              actions={<button className="btn btn-soft btn-xs" onClick={() => setVerMig(!verMig)}>{verMig ? "Ocultar SQL" : "Ver SQL de migración"}</button>}
+                ? `Ejecuta el SQL una vez para crear: ${cloudStatus.faltantes.join(", ")}. También repara columnas faltantes (como "extra" en estudiantes).`
+                : "Script único y garantizado: crea las 18 tablas, repara columnas, recrea políticas y activa el tiempo real. No borra datos."}
+              actions={<Badge tone={cloudStatus?.faltantes.length ? "red" : "green"} dot>{cloudStatus?.faltantes.length ? "Acción requerida" : "Al día"}</Badge>}
             />
-            {cloudStatus?.faltantes.length ? (
-              <div className="d-flex flex-wrap gap-1 mb-2">
-                {cloudStatus.faltantes.map((t) => <Badge key={t} tone="red" dot>{t}</Badge>)}
-              </div>
-            ) : null}
-            {verMig ? (
+
+            {verSql || cloudStatus?.faltantes.length ? (
               <div className="position-relative">
-                <pre className="p-3 rounded-3 overflow-auto" style={{ background: "#0d1524", color: "#a8c6e8", fontSize: 10.5, maxHeight: 240, fontFamily: "ui-monospace, Menlo, monospace" }}>{MIGRACIONES_SQL}</pre>
-                <button className="btn btn-gold btn-xs position-absolute" style={{ top: 10, right: 10 }} onClick={() => { navigator.clipboard?.writeText(MIGRACIONES_SQL).then(() => toast("SQL de migración copiado", "ok")).catch(() => undefined); }}><Copy size={11} /> Copiar</button>
+                <pre className="p-3 rounded-3 overflow-auto" style={{ background: "#0d1524", color: "#a8c6e8", fontSize: 10.5, maxHeight: 300, fontFamily: "ui-monospace, Menlo, monospace" }}>{SUPABASE_SCHEMA_SEGURO}</pre>
+                <div className="position-absolute d-flex gap-1" style={{ top: 10, right: 10 }}>
+                  <button className="btn btn-ghost btn-xs" style={{ background: "rgba(255,255,255,0.08)", color: "#a8c6e8", borderColor: "rgba(168,198,232,0.3)" }} onClick={() => { downloadFile("esquema-jyg-18-tablas.sql", SUPABASE_SCHEMA_SEGURO, "text/plain"); toast("esquema-jyg-18-tablas.sql descargado", "ok"); }}>
+                    <Download size={11} /> .sql
+                  </button>
+                  <button className="btn btn-gold btn-xs" onClick={() => { navigator.clipboard?.writeText(SUPABASE_SCHEMA_SEGURO).then(() => toast("Esquema completo copiado", "ok")).catch(() => undefined); }}>
+                    <Copy size={11} /> Copiar
+                  </button>
+                </div>
               </div>
             ) : (
               <div className="d-flex align-items-start gap-2 flex-wrap" style={{ fontSize: 12.5, color: "var(--ink-soft)" }}>
-                <span className="d-flex align-items-center justify-content-center rounded-3 flex-shrink-0" style={{ width: 34, height: 34, background: "var(--tint-warn)", color: "var(--warn)" }}><i className="bi bi-tools" /></span>
-                <span style={{ flex: 1, minWidth: 220 }}>
-                  Abre <b>Supabase → SQL Editor</b>, pulsa <b>Ver SQL de migración → Copiar</b>, pega y ejecuta.
-                  Es seguro repetirlo: solo agrega columnas que faltan, nunca toca tus datos.
+                <span className="d-flex align-items-center justify-content-center rounded-3 flex-shrink-0" style={{ width: 34, height: 34, background: "var(--tint-ok)", color: "var(--ok)" }}><ShieldCheck size={17} /></span>
+                <span style={{ flex: 1, minWidth: 240 }}>
+                  Tu esquema está completo. Si algún día aparece un error de tabla o columna, pulsa{" "}
+                  <b>Ver SQL de migración</b> y ejecuta el script: está garantizado sin errores y nunca toca tus datos.
                 </span>
               </div>
             )}
-            <div className="d-flex gap-2 mt-3">
-              <button className="btn btn-primary btn-sm" onClick={() => { void testCloudNow(); toast("Verificando esquema…", "ok"); }}>
-                <i className="bi bi-arrow-clockwise" /> Verificar migración
-              </button>
-              {cloudStatus?.faltantes.length === 0 && cloudStatus?.ok && (
-                <Badge tone="green" dot>Esquema completo · 18/18 tablas</Badge>
-              )}
+
+            <div className="d-flex align-items-center gap-2 flex-wrap mt-3 p-2 rounded-3" style={{ background: "var(--card-bg-2)", fontSize: 12 }}>
+              <i className="bi bi-info-circle" style={{ color: "var(--jyg-navy)" }} />
+              <span style={{ flex: 1, minWidth: 240, color: "var(--ink-soft)" }}>
+                <b>Supabase → SQL Editor → New query</b> · pega el script · <b>Run</b> · luego <b>Verificar ahora</b>.
+                Crea lo que falta, repara columnas y activa el tiempo real — sin errores aunque ya exista todo.
+              </span>
             </div>
           </div>
         </div>
