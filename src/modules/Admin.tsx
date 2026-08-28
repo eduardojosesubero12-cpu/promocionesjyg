@@ -1,13 +1,13 @@
 import React, { useMemo, useRef, useState } from "react";
 import {
-  BarChart3, Boxes, Check, Copy, Download, Eye, EyeOff, GraduationCap, History, KeyRound,
+  AlertTriangle, BarChart3, Boxes, Check, Copy, Download, Eye, EyeOff, GraduationCap, History, KeyRound,
   Package, Pencil, Plug, Plus, Save, ScanLine, ShieldCheck, Sparkles, Trash2, Upload, UserCog, Users, Wallet, X,
 } from "lucide-react";
 import { useApp } from "../lib/store";
 import type { CatAdicional, PaqueteEscuela, Rol, Usuario } from "../lib/data";
 import {
   ACCESOS_DEFAULT, API_DOLARES, API_EUROS, DB_TABLES, MIGRACIONES_SQL, MODULOS_GRUPOS, OPENROUTER_MODELOS, ORDEN_MATERIALES,
-  PAQUETES, ROL_DESC, ROL_LABEL, ROLES_INFO, SUPABASE_SETUP_SQL, TODOS_MODULOS,
+  PAQUETES, ROL_DESC, ROL_LABEL, ROLES_INFO, SUPABASE_SETUP_SQL, TODOS_MODULOS, sqlParaTablasFaltantes,
   computeProduccion, downloadFile, estudianteTotales, fmtBs, fmtFecha, fmtFechaHoraViva, fmtHaceSegundos,
   fmtUSD, getAdicionales, getGrados, getSecciones, getTallas, toCSV, todayISO, uid,
 } from "../lib/data";
@@ -895,6 +895,41 @@ export function Integraciones() {
           </React.Fragment>
         ))}
       </div>
+
+      {/* Acción requerida: tablas faltantes — SQL auto-generado */}
+      {cloudStatus?.faltantes.length ? (
+        <div className="card p-3 p-md-4 mb-3" style={{ borderLeft: "4px solid var(--danger)", background: "color-mix(in srgb, var(--danger) 4%, var(--card-bg))" }}>
+          <SectionHead
+            title={<span className="d-flex align-items-center gap-2"><AlertTriangle size={17} style={{ color: "var(--danger)" }} /> Faltan {cloudStatus.faltantes.length} tablas en Supabase</span>}
+            desc="Copia el SQL generado abajo y ejecútalo una vez en SQL Editor. Es idempotente y no toca tus datos."
+            actions={<Badge tone="red" dot>Acción requerida</Badge>}
+          />
+          <div className="d-flex flex-wrap gap-1 mb-2">
+            {cloudStatus.faltantes.map((t) => <Badge key={t} tone="red" dot>{t}</Badge>)}
+          </div>
+          <div className="position-relative">
+            <pre className="p-3 rounded-3 overflow-auto" style={{ background: "#0d1524", color: "#a8c6e8", fontSize: 10.5, maxHeight: 260, fontFamily: "ui-monospace, Menlo, monospace" }}>
+              {sqlParaTablasFaltantes(cloudStatus.faltantes)}
+            </pre>
+            <button
+              className="btn btn-gold btn-xs position-absolute"
+              style={{ top: 10, right: 10 }}
+              onClick={() => { navigator.clipboard?.writeText(sqlParaTablasFaltantes(cloudStatus.faltantes)).then(() => toast(`SQL copiado (${cloudStatus.faltantes.length} tablas)`, "ok")).catch(() => undefined); }}
+            >
+              <Copy size={11} /> Copiar SQL
+            </button>
+          </div>
+          <div className="d-flex align-items-center gap-2 flex-wrap mt-3" style={{ fontSize: 12.5, color: "var(--ink-soft)" }}>
+            <span className="d-flex align-items-center justify-content-center rounded-3 flex-shrink-0" style={{ width: 30, height: 30, background: "var(--tint-danger)", color: "var(--danger)" }}><i className="bi bi-terminal" /></span>
+            <span style={{ flex: 1, minWidth: 220 }}>
+              <b>Supabase → SQL Editor → New query</b>, pega el SQL y pulsa <b>Run</b>. Después verifica aquí.
+            </span>
+            <button className="btn btn-primary btn-sm" onClick={() => { void testCloudNow(); toast("Verificando esquema…", "ok"); }}>
+              <i className="bi bi-arrow-clockwise" /> Verificar ahora
+            </button>
+          </div>
+        </div>
+      ) : null}
 
       <div className="row g-3">
         {/* Paso 1: conexión */}
