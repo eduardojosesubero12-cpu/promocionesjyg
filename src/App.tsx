@@ -7,6 +7,7 @@ import { Escuelas, Docentes, Estudiantes, Clientes, Ventas, Cotizaciones, Mensaj
 import Paquetes from "./modules/Paquetes";
 import { Sesiones, Agenda, Produccion, EtiquetasQRPage, OcrModal, OcrPage, Facturas } from "./modules/Operaciones";
 import { Reportes, Usuarios, Configuracion, Integraciones } from "./modules/Admin";
+import Login from "./modules/Login";
 
 const ROUTES: Record<Route, React.ComponentType> = {
   dashboard: Dashboard, clientes: Clientes, escuelas: Escuelas, docentes: Docentes,
