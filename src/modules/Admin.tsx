@@ -200,7 +200,7 @@ export function Reportes() {
 /* ============================================================
    USUARIOS — roles, accesos y equipo
    ============================================================ */
-const uVacio = (): Usuario => ({ id: "", nombre: "", usuario: "", rol: "operador", activo: true });
+const uVacio = (): Usuario => ({ id: "", nombre: "", usuario: "", email: "", password: "", rol: "operador", activo: true });
 
 export function Usuarios() {
   const { db, user, saveUsuario, deleteUsuario, setCurrentUser, setRolPermisos, setRolActivo, confirm, success, toast } = useApp();
