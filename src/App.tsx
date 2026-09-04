@@ -49,14 +49,25 @@ class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { err
   }
 }
 
+/* Gate de acceso: sin sesión iniciada solo se muestra la pantalla de login */
+function Gate() {
+  const { sesion } = useApp();
+  if (!sesion) return <Login />;
+  return (
+    <>
+      <Shell>
+        <Router />
+      </Shell>
+      <OcrModal />
+    </>
+  );
+}
+
 export default function App() {
   return (
     <ErrorBoundary>
       <AppProvider>
-        <Shell>
-          <Router />
-        </Shell>
-        <OcrModal />
+        <Gate />
         <ConfirmHost />
         <SuccessHost />
         <ToastHost />

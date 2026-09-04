@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   BarChart3, Bell, CalendarDays, Camera, ChevronDown, ChevronRight, FileText, GraduationCap,
-  LayoutDashboard, Menu, MessageSquare, Moon, Package, Plug, QrCode, Receipt, ScanLine, School,
+  LayoutDashboard, LogOut, Menu, MessageSquare, Moon, Package, Plug, QrCode, Receipt, ScanLine, School,
   Search, Settings, ShoppingBag, Sun, UserCog, Users, Wallet, X, type LucideIcon,
 } from "lucide-react";
 import { useApp } from "../lib/store";
@@ -114,7 +114,7 @@ function ThemeToggle() {
 }
 
 export default function Shell({ children }: { children: React.ReactNode }) {
-  const { db, route, setRoute, can, user, setCurrentUser, alerts, setOcrOpen, tasa, refreshTasa, tasaLoading } = useApp();
+  const { route, setRoute, can, user, logout, alerts, setOcrOpen, tasa, refreshTasa, tasaLoading } = useApp();
   const [mini, setMini] = useState(false);
   const [movil, setMovil] = useState(false);
   const [bellOpen, setBellOpen] = useState(false);
@@ -238,18 +238,29 @@ export default function Shell({ children }: { children: React.ReactNode }) {
                 <ChevronDown size={13} style={{ color: "var(--ink-faint)" }} />
               </button>
               {profOpen && (
-                <div className="search-drop" style={{ right: 0, left: "auto", width: 250 }}>
-                  <div className="px-3 py-2 font-display fw-semibold" style={{ fontSize: 12.5, borderBottom: "1px solid var(--line-soft)" }}>Cambiar usuario</div>
-                  {db.usuarios.filter((u) => u.activo).map((u) => (
-                    <button key={u.id} className="search-item" onClick={() => { setCurrentUser(u.id); setProfOpen(false); }}>
-                      <span className="d-flex align-items-center justify-content-center rounded-3 font-display fw-bold" style={{ width: 30, height: 30, background: u.id === user.id ? "var(--jyg-navy)" : "var(--tint-navy-2)", color: u.id === user.id ? "#ffd970" : "var(--jyg-navy)", fontSize: 11, flexShrink: 0 }}>{iniciales(u.nombre)}</span>
-                      <span className="flex-grow-1" style={{ minWidth: 0 }}>
-                        <span className="d-block font-display fw-semibold" style={{ fontSize: 12.5 }}>{u.nombre}</span>
-                        <span className="d-block" style={{ fontSize: 10.5, color: "var(--ink-faint)" }}>{ROL_LABEL[u.rol]}</span>
-                      </span>
-                      {u.id === user.id && <span className="dot" style={{ background: "var(--ok)" }} />}
+                <div className="search-drop" style={{ right: 0, left: "auto", width: 270 }}>
+                  <div className="px-3 py-2 font-display fw-semibold" style={{ fontSize: 12.5, borderBottom: "1px solid var(--line-soft)" }}>Mi cuenta</div>
+                  <div className="d-flex align-items-center gap-2 px-3 py-2" style={{ borderBottom: "1px solid var(--line-soft)" }}>
+                    <span className="d-flex align-items-center justify-content-center rounded-3 font-display fw-bold" style={{ width: 34, height: 34, background: "var(--jyg-navy)", color: "#ffd970", fontSize: 12, flexShrink: 0 }}>{iniciales(user?.nombre)}</span>
+                    <span className="flex-grow-1" style={{ minWidth: 0 }}>
+                      <span className="d-block font-display fw-semibold text-truncate" style={{ fontSize: 12.5 }}>{user?.nombre || "Usuario"}</span>
+                      <span className="d-block text-truncate" style={{ fontSize: 10.5, color: "var(--ink-faint)" }}>{user?.email || `@${user?.usuario || ""}`}</span>
+                    </span>
+                    <span className="badge rounded-pill" style={{ background: "var(--tint-navy-2)", color: "var(--jyg-navy)", fontSize: 10 }}>{ROL_LABEL[user?.rol] || user?.rol}</span>
+                  </div>
+                  <div className="px-3 py-2" style={{ fontSize: 11, color: "var(--ink-faint)", borderBottom: "1px solid var(--line-soft)" }}>
+                    Acceso a {MODULOS_GRUPOS.reduce((n, g) => n + g.items.filter((i) => can(i.ruta as Route)).length, 0)} módulos según tu rol.
+                  </div>
+                  {can("usuarios") && (
+                    <button className="search-item" onClick={() => go("usuarios")}>
+                      <Users size={15} style={{ color: "var(--ink-faint)" }} />
+                      <span className="flex-grow-1 font-display fw-semibold" style={{ fontSize: 12.5 }}>Gestionar usuarios y roles</span>
                     </button>
-                  ))}
+                  )}
+                  <button className="search-item" onClick={() => { setProfOpen(false); logout(); }}>
+                    <LogOut size={15} style={{ color: "var(--err, #e5342b)" }} />
+                    <span className="flex-grow-1 font-display fw-semibold" style={{ fontSize: 12.5, color: "var(--err, #e5342b)" }}>Cerrar sesión</span>
+                  </button>
                 </div>
               )}
             </div>
