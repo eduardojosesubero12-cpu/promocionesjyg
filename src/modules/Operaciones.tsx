@@ -373,7 +373,7 @@ export function Produccion() {
                   const faltan = Object.values(e.codigos).filter((c) => !c).length;
                   return (
                     <button key={e.id} onClick={() => setRoute("estudiantes", { open: e.id })} className="d-flex align-items-center gap-2 p-2 rounded-3 border-0 text-start" style={{ background: "var(--card-bg-2)", cursor: "pointer", color: "var(--ink)" }}>
-                      <span className="d-flex align-items-center justify-content-center rounded-3 font-display fw-bold flex-shrink-0" style={{ width: 34, height: 34, background: "var(--tint-warn)", color: "var(--warn)", fontSize: 12 }}>{e.nombre[0]}</span>
+                      <span className="d-flex align-items-center justify-content-center rounded-3 font-display fw-bold flex-shrink-0" style={{ width: 34, height: 34, background: "var(--tint-warn)", color: "var(--warn)", fontSize: 12 }}>{(e.nombre || "?")[0]}</span>
                       <span className="flex-grow-1" style={{ minWidth: 0 }}>
                         <span className="d-block font-display fw-semibold text-truncate" style={{ fontSize: 13 }}>{e.nombre} · {e.pedido}</span>
                         <span className="d-block" style={{ fontSize: 11, color: "var(--ink-faint)" }}>{db.escuelas.find((x) => x.id === e.escuelaId)?.nombre}</span>
@@ -879,7 +879,7 @@ export function OcrPage() {
           <div className="d-flex flex-column gap-2">
             {recientes.map((e) => (
               <button key={e.id} onClick={() => setRoute("estudiantes", { open: e.id })} className="d-flex align-items-center gap-2 p-2 rounded-3 border-0 text-start w-100" style={{ background: "var(--card-bg-2)", color: "var(--ink)", cursor: "pointer" }}>
-                <span className="d-flex align-items-center justify-content-center rounded-3 font-display fw-bold flex-shrink-0" style={{ width: 36, height: 36, fontSize: 12, background: "var(--tint-navy-2)", color: "var(--jyg-navy)" }}>{e.nombre[0]}</span>
+                <span className="d-flex align-items-center justify-content-center rounded-3 font-display fw-bold flex-shrink-0" style={{ width: 36, height: 36, fontSize: 12, background: "var(--tint-navy-2)", color: "var(--jyg-navy)" }}>{(e.nombre || "?")[0]}</span>
                 <span className="flex-grow-1" style={{ minWidth: 0 }}>
                   <span className="d-block font-display fw-semibold text-truncate" style={{ fontSize: 13 }}>{e.nombre}</span>
                   <span className="d-block" style={{ fontSize: 11, color: "var(--ink-faint)" }}>{e.pedido} · {e.ci || "S/C"}</span>
@@ -1011,7 +1011,7 @@ export function Facturas() {
                 const activa = sel?.id === e.id;
                 return (
                   <button key={e.id} onClick={() => setSelId(e.id)} className="d-flex align-items-center gap-2 p-2 rounded-3 border-0 text-start w-100" style={{ background: activa ? "var(--tint-navy-2)" : "var(--card-bg)", outline: activa ? "1.5px solid var(--jyg-navy-500)" : "1.5px solid var(--line-soft)", cursor: "pointer", color: "var(--ink)" }}>
-                    <span className="d-flex align-items-center justify-content-center rounded-3 font-display fw-bold flex-shrink-0" style={{ width: 38, height: 38, fontSize: 13, background: activa ? "var(--jyg-navy)" : "var(--tint-navy-2)", color: activa ? "#ffd970" : "var(--jyg-navy)" }}>{e.nombre[0]}</span>
+                    <span className="d-flex align-items-center justify-content-center rounded-3 font-display fw-bold flex-shrink-0" style={{ width: 38, height: 38, fontSize: 13, background: activa ? "var(--jyg-navy)" : "var(--tint-navy-2)", color: activa ? "#ffd970" : "var(--jyg-navy)" }}>{(e.nombre || "?")[0]}</span>
                     <span className="flex-grow-1" style={{ minWidth: 0 }}>
                       <span className="d-block font-display fw-semibold text-truncate" style={{ fontSize: 13 }}>{e.nombre}</span>
                       <span className="d-block" style={{ fontSize: 11, color: "var(--ink-faint)" }}>{e.pedido} · {escuelaDe(e.escuelaId)?.nombre || "—"}</span>

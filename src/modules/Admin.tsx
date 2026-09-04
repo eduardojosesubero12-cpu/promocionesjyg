@@ -263,7 +263,7 @@ export function Usuarios() {
 
       {/* Sesión actual */}
       <div className="card p-3 p-md-4 mb-3 d-flex align-items-center gap-3 flex-wrap" style={{ borderLeft: "4px solid var(--jyg-gold)" }}>
-        <span className="d-flex align-items-center justify-content-center rounded-3 font-display fw-bold" style={{ width: 48, height: 48, background: "linear-gradient(150deg,var(--jyg-navy),#0b2e52)", color: "#ffd970", fontSize: 16 }}>{user.nombre.split(" ").map((p) => p[0]).slice(0, 2).join("")}</span>
+        <span className="d-flex align-items-center justify-content-center rounded-3 font-display fw-bold" style={{ width: 48, height: 48, background: "linear-gradient(150deg,var(--jyg-navy),#0b2e52)", color: "#ffd970", fontSize: 16 }}>{(user?.nombre || "?").split(" ").map((p) => p[0]).slice(0, 2).join("")}</span>
         <div className="flex-grow-1" style={{ minWidth: 160 }}>
           <div className="font-display fw-bold" style={{ fontSize: 15.5 }}>{user.nombre} <Badge tone="gold">Sesión actual</Badge></div>
           <div style={{ fontSize: 12, color: "var(--ink-soft)" }}>@{user.usuario} · {ROL_LABEL[user.rol]} · {permisos(user.rol).length} de {TODOS_MODULOS.length} módulos activos</div>
@@ -357,7 +357,7 @@ export function Usuarios() {
           {db.usuarios.map((u, i) => (
             <div key={u.id} className="col-12 col-md-6 col-xl-4">
               <div className="user-card h-100" style={{ opacity: u.activo ? 1 : 0.55 }}>
-                <span className="av" style={{ width: 44, height: 44, fontSize: 14 }}>{u.nombre.split(" ").map((p) => p[0]).slice(0, 2).join("")}</span>
+                <span className="av" style={{ width: 44, height: 44, fontSize: 14 }}>{(u.nombre || "?").split(" ").map((p) => p[0]).slice(0, 2).join("")}</span>
                 <div className="flex-grow-1" style={{ minWidth: 0 }}>
                   <div className="font-display fw-bold text-truncate" style={{ fontSize: 13.5 }}>{u.nombre} {u.id === user.id && <Badge tone="gold">Usted</Badge>}</div>
                   <div style={{ fontSize: 11, color: "var(--ink-faint)" }}>@{u.usuario}</div>

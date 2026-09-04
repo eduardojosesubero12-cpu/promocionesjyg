@@ -62,7 +62,7 @@ export default function Dashboard() {
       <div className="page-head">
         <div>
           <div className="crumb">Panel administrador · {new Date(now).toLocaleDateString("es-VE", { weekday: "long", day: "numeric", month: "long" })}</div>
-          <h1>{saludo}, {user.nombre.split(" ")[0]} 👋</h1>
+          <h1>{saludo}, {(user?.nombre || "").split(" ")[0]} 👋</h1>
           <p style={{ fontSize: 13.5, margin: "4px 0 0", color: "var(--ink-soft)" }}>
             Resumen de la temporada de grados · <b className="tabular-nums">{est.length}</b> estudiantes registrados
           </p>
