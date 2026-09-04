@@ -241,6 +241,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       mutate((d) => ({ ...d, usuarios: d.usuarios.map((x) => (x.id === u.id ? { ...x, password: hash } : x)) }));
     }
     setSesion(u);
+    setDb((d) => ({ ...d, currentUserId: u.id }));
+    setRouteState("dashboard");
     try { localStorage.setItem("jyg-sesion", JSON.stringify(u)); } catch { /* noop */ }
     return { ok: true };
   }, [mutate]);
@@ -432,11 +434,22 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  /* Siempre devuelve un usuario válido: el actual, el primero activo, el primero, o el admin base */
-  const user = useMemo<Usuario>(
-    () => db.usuarios.find((u) => u.id === db.currentUserId) || db.usuarios.find((u) => u.activo) || db.usuarios[0] || SEED_USUARIOS[0],
-    [db.usuarios, db.currentUserId],
-  );
+  /* El usuario activo es el de la sesión iniciada (con sus datos frescos desde la BD, para que
+     cambios de rol o desactivación se apliquen al instante). Si no hay sesión, un fallback seguro. */
+  const user = useMemo<Usuario>(() => {
+    if (sesion) return db.usuarios.find((u) => u.id === sesion.id) || sesion;
+    return db.usuarios.find((u) => u.id === db.currentUserId) || db.usuarios.find((u) => u.activo) || db.usuarios[0] || SEED_USUARIOS[0];
+  }, [sesion, db.usuarios, db.currentUserId]);
+
+  /* Si el usuario con sesión fue eliminado o desactivado por un administrador, se cierra su sesión */
+  useEffect(() => {
+    if (!sesion) return;
+    const actual = db.usuarios.find((u) => u.id === sesion.id);
+    if (db.usuarios.length > 0 && (!actual || !actual.activo)) {
+      setSesion(null);
+      try { localStorage.removeItem("jyg-sesion"); } catch { /* noop */ }
+    }
+  }, [sesion, db.usuarios]);
   const setCurrentUser = useCallback((id: string) => setDb((d) => ({ ...d, currentUserId: id })), []);
   const can = useCallback((r: Route) => {
     const rol = user?.rol || "admin";

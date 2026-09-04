@@ -9,7 +9,7 @@ import {
   ACCESOS_DEFAULT, API_DOLARES, API_EUROS, DB_TABLES, MODULOS_GRUPOS, OPENROUTER_MODELOS, ORDEN_MATERIALES,
   PAQUETES, ROL_DESC, ROL_LABEL, ROLES_INFO, SUPABASE_SCHEMA_SEGURO, TODOS_MODULOS,
   computeProduccion, downloadFile, estudianteTotales, fmtBs, fmtFecha, fmtFechaHoraViva, fmtHaceSegundos,
-  fmtUSD, getAdicionales, getGrados, getSecciones, getTallas, toCSV, todayISO, uid,
+  fmtUSD, getAdicionales, getGrados, getSecciones, getTallas, hashPass, toCSV, todayISO, uid,
 } from "../lib/data";
 import {
   Badge, Bar, EmptyState, Field, FilterSelect, FormFoot, FormSec, Modal, SearchInput, SectionHead,
@@ -206,6 +206,8 @@ export function Usuarios() {
   const { db, user, saveUsuario, deleteUsuario, setCurrentUser, setRolPermisos, setRolActivo, confirm, success, toast } = useApp();
   const [rolSel, setRolSel] = useState<Rol>("admin");
   const [form, setForm] = useState<Usuario | null>(null);
+  const [nuevaPass, setNuevaPass] = useState("");
+  const [verPass, setVerPass] = useState(false);
   const [guardado, setGuardado] = useState(0);
   const [verMatriz, setVerMatriz] = useState(true);
 
@@ -228,13 +230,20 @@ export function Usuarios() {
     setRolActivo(rol, encender);
     flash();
   };
+  const abrirForm = (u: Usuario) => { setForm(u); setNuevaPass(""); setVerPass(false); };
   const guardarU = async () => {
     if (!form || !form.nombre.trim() || !form.usuario.trim()) { toast("Completa nombre y usuario", "err"); return; }
+    const email = form.email.trim().toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { toast("Escribe un correo válido", "err"); return; }
+    if (db.usuarios.some((u) => u.id !== form.id && (u.email || "").toLowerCase() === email)) { toast("Ya existe un usuario con ese correo", "err"); return; }
+    if (!form.id && nuevaPass.length < 6) { toast("La contraseña debe tener al menos 6 caracteres", "err"); return; }
+    if (form.id && nuevaPass && nuevaPass.length < 6) { toast("La nueva contraseña debe tener al menos 6 caracteres", "err"); return; }
     const ok = await confirm({ title: "¿Desea guardar este registro?", message: "Verifique la información antes de continuar.", confirmText: "Sí, Guardar" });
     if (!ok) return;
-    saveUsuario({ ...form, id: form.id || uid() });
+    const password = nuevaPass ? await hashPass(nuevaPass) : form.password;
+    saveUsuario({ ...form, email, id: form.id || uid(), password });
     success();
-    setForm(null);
+    setForm(null); setNuevaPass("");
   };
   const eliminarU = async (u: Usuario) => {
     if (u.id === user.id) { toast("No puedes eliminar al usuario en sesión", "err"); return; }
@@ -258,7 +267,7 @@ export function Usuarios() {
           <h1>Usuarios</h1>
           <p style={{ fontSize: 13.5, margin: "4px 0 0", color: "var(--ink-soft)" }}>Roles y accesos del equipo JyG — los cambios se guardan al instante</p>
         </div>
-        <button className="btn btn-primary" onClick={() => setForm(uVacio())}><Plus size={16} /> Nuevo usuario</button>
+        <button className="btn btn-primary" onClick={() => abrirForm(uVacio())}><Plus size={16} /> Nuevo usuario</button>
       </div>
 
       {/* Sesión actual */}
@@ -360,7 +369,7 @@ export function Usuarios() {
                 <span className="av" style={{ width: 44, height: 44, fontSize: 14 }}>{(u.nombre || "?").split(" ").map((p) => p[0]).slice(0, 2).join("")}</span>
                 <div className="flex-grow-1" style={{ minWidth: 0 }}>
                   <div className="font-display fw-bold text-truncate" style={{ fontSize: 13.5 }}>{u.nombre} {u.id === user.id && <Badge tone="gold">Usted</Badge>}</div>
-                  <div style={{ fontSize: 11, color: "var(--ink-faint)" }}>@{u.usuario}</div>
+                  <div className="text-truncate" style={{ fontSize: 11, color: "var(--ink-faint)" }}>@{u.usuario} · {u.email || "sin correo"}</div>
                   <select className="select mt-1" style={{ height: 30, fontSize: 12 }} value={u.rol} onChange={(e) => void cambiarRol(u, e.target.value as Rol)}>
                     {ROLES_INFO.map((r) => <option key={r.id} value={r.id}>{r.label}</option>)}
                   </select>
@@ -372,7 +381,7 @@ export function Usuarios() {
                     toast(v ? "Usuario activado" : "Usuario desactivado", v ? "ok" : "warn");
                   }} />
                   <div className="d-flex gap-1">
-                    <button className="icon-btn" style={{ width: 28, height: 28 }} title="Editar" onClick={() => setForm(u)}><Pencil size={12} /></button>
+                    <button className="icon-btn" style={{ width: 28, height: 28 }} title="Editar" onClick={() => abrirForm(u)}><Pencil size={12} /></button>
                     <button className="icon-btn danger" style={{ width: 28, height: 28 }} title="Eliminar" onClick={() => void eliminarU(u)}><Trash2 size={12} /></button>
                   </div>
                 </div>
@@ -387,12 +396,24 @@ export function Usuarios() {
           <div className="f-grid">
             <FormSec icon={<UserCog size={15} />}>Credenciales</FormSec>
             <Field label="Nombre completo" required span="c-12"><input className="input" autoFocus value={form.nombre} onChange={(e) => setForm({ ...form, nombre: e.target.value })} /></Field>
-            <Field label="Usuario (login)" required span="c-6"><input className="input" value={form.usuario} onChange={(e) => setForm({ ...form, usuario: e.target.value })} /></Field>
+            <Field label="Usuario" required span="c-6"><input className="input" placeholder="ej. maria.perez" value={form.usuario} onChange={(e) => setForm({ ...form, usuario: e.target.value.trim().toLowerCase() })} /></Field>
             <Field label="Rol" span="c-6">
               <select className="select" value={form.rol} onChange={(e) => setForm({ ...form, rol: e.target.value as Rol })}>
                 {ROLES_INFO.map((r) => <option key={r.id} value={r.id}>{r.label}</option>)}
               </select>
             </Field>
+            <Field label="Correo electrónico (inicio de sesión)" required span="c-12">
+              <input className="input" type="email" placeholder="correo@jyg.com.ve" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value.trim().toLowerCase() })} />
+            </Field>
+            <Field label={form.id ? "Nueva contraseña (deja vacío para mantener la actual)" : "Contraseña"} required={!form.id} span="c-12">
+              <div className="d-flex gap-2">
+                <input className="input flex-grow-1" type={verPass ? "text" : "password"} placeholder={form.id ? "••••••••" : "Mínimo 6 caracteres"} value={nuevaPass} onChange={(e) => setNuevaPass(e.target.value)} autoComplete="new-password" />
+                <button type="button" className="btn btn-ghost" style={{ flexShrink: 0 }} onClick={() => setVerPass(!verPass)} aria-label="Mostrar contraseña">{verPass ? <EyeOff size={15} /> : <Eye size={15} />}</button>
+              </div>
+            </Field>
+            <div className="c-12" style={{ fontSize: 11.5, color: "var(--ink-faint)" }}>
+              El usuario entrará al CRM con su <b>correo</b> y <b>contraseña</b>, y verá solo los módulos permitidos para su rol <b>{ROL_LABEL[form.rol]}</b>. La contraseña se guarda cifrada.
+            </div>
           </div>
           <FormFoot onCancel={() => setForm(null)} onSave={() => void guardarU()} />
         </Modal>
