@@ -9,8 +9,8 @@ const codV = () => ({ carnetAlumno: "", carnetRep: "", firmaLibro: "", togaBirre
 
 export function dbToRows(db: CRMData): Record<string, any[]> {
   return {
-    escuelas: db.escuelas.map((e) => ({ id: e.id, nombre: e.nombre, director: e.director, telefono: e.telefono, direccion: e.direccion, estado: e.estado, municipio: e.municipio, anio_escolar: e.anioEscolar, observaciones: e.observaciones })),
-    docentes: db.docentes.map((d) => ({ id: d.id, nombre: d.nombre, telefono: d.telefono, escuela_id: d.escuelaId || null, correo: d.correo, observaciones: d.observaciones })),
+    escuelas: db.escuelas.map((e) => ({ id: e.id, nombre: e.nombre || "", director: e.director, telefono: e.telefono, direccion: e.direccion, estado: e.estado, municipio: e.municipio, anio_escolar: e.anioEscolar, observaciones: e.observaciones })),
+    docentes: db.docentes.map((d) => ({ id: d.id, nombre: d.nombre || "", telefono: d.telefono, escuela_id: d.escuelaId || null, correo: d.correo, observaciones: d.observaciones })),
     estudiantes: db.estudiantes.map((e) => ({ id: e.id, pedido: e.pedido, nombre: e.nombre, telefono: e.telefono, representante: e.representante, ci: e.ci, escuela_id: e.escuelaId || null, docente_id: e.docenteId || null, grado: e.grado, seccion: e.seccion, paquete_id: e.paqueteId, precio_paquete: e.precioPaquete, estado_pedido: e.estadoPedido, fecha_registro: e.fechaRegistro, fecha_entrega: e.fechaEntrega || null, observaciones: e.observaciones, codigos: e.codigos, extra: { fechaNacimiento: e.fechaNacimiento, direccion: e.direccion, email: e.email, representanteCi: e.representanteCi, telefonoRepresentante: e.telefonoRepresentante, tallaCamisa: e.tallaCamisa, tallaAnillo: e.tallaAnillo, alergias: e.alergias, tutor2: e.tutor2, codigosExtra: e.codigosExtra, actualizado: e.actualizado } })),
     pagos: db.estudiantes.flatMap((e) => e.pagos.map((p) => ({ id: p.id, estudiante_id: e.id, fecha: p.fecha, monto: p.monto, metodo: p.metodo, bs: p.bs, tasa: p.tasa, usd: p.usd, referencia: p.referencia, observacion: p.observacion }))),
     adicionales_items: db.estudiantes.flatMap((e) => e.adicionales.map((a, i) => ({ id: `${e.id}-ad-${i}`, estudiante_id: e.id, producto: a.producto, cantidad: a.cantidad, precio: a.precio, talla: a.talla }))),
@@ -34,7 +34,7 @@ export function rowsToDb(rows: Record<string, any[]>, base: CRMData): CRMData {
   const estudiantes: Estudiante[] = (rows.estudiantes || []).map((r) => {
     const x = r.extra || {};
     return {
-      id: r.id, pedido: r.pedido, nombre: r.nombre, telefono: r.telefono || "", representante: r.representante || "", ci: r.ci || "",
+      id: r.id, pedido: r.pedido || "", nombre: r.nombre || "", telefono: r.telefono || "", representante: r.representante || "", ci: r.ci || "",
       escuelaId: r.escuela_id || "", docenteId: r.docente_id || "", grado: r.grado || "Bachiller", seccion: r.seccion || "A",
       paqueteId: r.paquete_id || "premium", precioPaquete: Number(r.precio_paquete) || 0,
       adicionales: (rows.adicionales_items || []).filter((a) => a.estudiante_id === r.id).map((a): AdicionalItem => ({ producto: a.producto, cantidad: Number(a.cantidad), precio: Number(a.precio), talla: a.talla || "" })),
@@ -53,15 +53,18 @@ export function rowsToDb(rows: Record<string, any[]>, base: CRMData): CRMData {
   }));
   const cfg = (rows.configuracion || [])[0];
   return {
-    escuelas: (rows.escuelas || []).map((e) => ({ id: e.id, nombre: e.nombre, director: e.director || "", telefono: e.telefono || "", direccion: e.direccion || "", estado: e.estado || "", municipio: e.municipio || "", anioEscolar: e.anio_escolar || "", observaciones: e.observaciones || "" })),
-    docentes: (rows.docentes || []).map((d) => ({ id: d.id, nombre: d.nombre, telefono: d.telefono || "", escuelaId: d.escuela_id || "", correo: d.correo || "", observaciones: d.observaciones || "" })),
+    escuelas: (rows.escuelas || []).map((e) => ({ id: e.id, nombre: e.nombre || "", director: e.director || "", telefono: e.telefono || "", direccion: e.direccion || "", estado: e.estado || "", municipio: e.municipio || "", anioEscolar: e.anio_escolar || "", observaciones: e.observaciones || "" })),
+    docentes: (rows.docentes || []).map((d) => ({ id: d.id, nombre: d.nombre || "", telefono: d.telefono || "", escuelaId: d.escuela_id || "", correo: d.correo || "", observaciones: d.observaciones || "" })),
     estudiantes, cotizaciones,
     sesiones: (rows.sesiones || []).map((s) => ({ id: s.id, escuelaId: s.escuela_id || "", fecha: s.fecha || "", hora: s.hora || "", fotografo: s.fotografo || "", estado: s.estado || "Agendada", fotos: Number(s.fotos) || 0, nota: s.nota || "" })),
     eventos: (rows.eventos || []).map((e) => ({ id: e.id, fecha: e.fecha || "", hora: e.hora || "", titulo: e.titulo || "", tipo: e.tipo || "otro", escuelaId: e.escuela_id || undefined })),
     mensajes: (rows.mensajes || []).map((m) => ({ id: m.id, fecha: m.fecha || "", destinatario: m.destinatario || "", telefono: m.telefono || "", plantilla: m.plantilla || "", texto: m.texto || "" })),
-    usuarios: (rows.usuarios || []).map((u) => ({ id: u.id, nombre: u.nombre, usuario: u.usuario || "", email: u.email || "", password: u.password || "", rol: u.rol || "operador", activo: !!u.activo })),
+    /* Si la nube no tiene usuarios, se conservan los locales para que siempre exista un usuario activo */
+    usuarios: (rows.usuarios || []).length > 0
+      ? (rows.usuarios || []).map((u) => ({ id: u.id, nombre: u.nombre || "Usuario", usuario: u.usuario || "", email: u.email || "", password: u.password || "", rol: u.rol || "operador", activo: u.activo !== false }))
+      : base.usuarios,
     historialTasas: (rows.historial_tasas || []).map((h) => ({ id: h.id, fecha: h.fecha, usd: Number(h.usd), euro: Number(h.euro), paralelo: Number(h.paralelo), fuente: h.fuente || "dolarapi", actualizado: Number(h.actualizado) || 0 })),
-    paquetesEscuelas: (rows.paquetes_escuelas || []).map((p) => ({ id: p.id, escuelaId: p.escuela_id || "", nombre: p.nombre, tipoPaqueteId: p.tipo_paquete_id || "personalizado", precio: Number(p.precio) || 0, articulos: p.articulos || [], nota: p.nota || "", activo: !!p.activo, creado: p.creado || "" })),
+    paquetesEscuelas: (rows.paquetes_escuelas || []).map((p) => ({ id: p.id, escuelaId: p.escuela_id || "", nombre: p.nombre || "", tipoPaqueteId: p.tipo_paquete_id || "personalizado", precio: Number(p.precio) || 0, articulos: p.articulos || [], nota: p.nota || "", activo: !!p.activo, creado: p.creado || "" })),
     facturas: (rows.facturas || []).map((f) => ({ id: f.id, numero: f.numero || "", estudianteId: f.estudiante_id || "", estudiante: f.estudiante || "", fecha: f.fecha || "", total: Number(f.total) || 0, accion: f.accion || "" })),
     tarjetas: (rows.tarjetas_qr || []).map((t) => ({ id: t.id, fecha: t.fecha || "", estudianteId: t.estudiante_id || "", estudiante: t.estudiante || "", accion: t.accion || "", lote: t.lote || "" })),
     escaneos: (rows.escaneos_ocr || []).map((s) => ({ id: s.id, fecha: s.fecha || "", motor: s.motor || "", ok: !!s.ok, nombres: s.nombres || "", apellidos: s.apellidos || "", ci: s.ci || "" })),

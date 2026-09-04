@@ -31,7 +31,13 @@ const loadDB = (): DB => {
     /* Garantiza la conexión Supabase aunque el navegador tuviera credenciales vacías guardadas */
     if (!cfg.supabaseUrl) cfg.supabaseUrl = base.config.supabaseUrl;
     if (!cfg.supabaseKey) cfg.supabaseKey = base.config.supabaseKey;
-    return { ...base, ...d, config: cfg };
+    const merged: DB = { ...base, ...d, config: cfg };
+    /* Sanea colecciones: cualquier lista corrupta o vacía crítica vuelve a su valor base */
+    (Object.keys(base) as (keyof DB)[]).forEach((k) => {
+      if (Array.isArray(base[k]) && !Array.isArray(merged[k])) (merged as any)[k] = base[k];
+    });
+    if (merged.usuarios.length === 0) merged.usuarios = base.usuarios;
+    return merged;
   } catch { return seedDB(); }
 };
 
@@ -426,7 +432,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const user = useMemo(() => db.usuarios.find((u) => u.id === db.currentUserId) || db.usuarios[0], [db.usuarios, db.currentUserId]);
+  /* Siempre devuelve un usuario válido: el actual, el primero activo, el primero, o el admin base */
+  const user = useMemo<Usuario>(
+    () => db.usuarios.find((u) => u.id === db.currentUserId) || db.usuarios.find((u) => u.activo) || db.usuarios[0] || SEED_USUARIOS[0],
+    [db.usuarios, db.currentUserId],
+  );
   const setCurrentUser = useCallback((id: string) => setDb((d) => ({ ...d, currentUserId: id })), []);
   const can = useCallback((r: Route) => {
     const rol = user?.rol || "admin";

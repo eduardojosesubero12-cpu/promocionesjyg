@@ -9,6 +9,13 @@ import type { Route } from "../lib/store";
 import { MODULOS_GRUPOS, ROL_LABEL, fmtBs, fmtHaceSegundos, estudianteTotales } from "../lib/data";
 import { useNow } from "./ui";
 
+/* Iniciales seguras: nunca falla aunque el nombre venga vacío o indefinido */
+const iniciales = (nombre?: string | null) => {
+  const n = (nombre || "").trim();
+  if (!n) return "?";
+  return n.split(/\s+/).map((p) => p[0]).slice(0, 2).join("").toUpperCase();
+};
+
 /* Un icono propio para cada módulo (nítidos y consistentes en expandido y colapsado) */
 const ICONOS_MODULO: Record<string, LucideIcon> = {
   dashboard: LayoutDashboard, clientes: Users, escuelas: School, docentes: GraduationCap,
@@ -50,7 +57,7 @@ function GlobalSearch() {
   const resultados = useMemo(() => {
     const t = q.trim().toLowerCase();
     if (t.length < 2) return [];
-    return db.estudiantes.filter((e) => [e.nombre, e.ci, e.pedido, e.representante].some((v) => v.toLowerCase().includes(t))).slice(0, 7);
+    return db.estudiantes.filter((e) => [e.nombre, e.ci, e.pedido, e.representante].some((v) => (v || "").toLowerCase().includes(t))).slice(0, 7);
   }, [q, db.estudiantes]);
   const ir = (id: string) => { setRoute("estudiantes", { open: id }); setOpen(false); setQ(""); setMobile(false); };
   const box = (
@@ -68,7 +75,7 @@ function GlobalSearch() {
             const t = estudianteTotales(e);
             return (
               <button key={e.id} className="search-item" onClick={() => ir(e.id)}>
-                <span className="d-flex align-items-center justify-content-center rounded-3 font-display fw-bold" style={{ width: 34, height: 34, background: "var(--tint-navy-2)", color: "var(--jyg-navy)", fontSize: 12, flexShrink: 0 }}>{e.nombre[0]}</span>
+                <span className="d-flex align-items-center justify-content-center rounded-3 font-display fw-bold" style={{ width: 34, height: 34, background: "var(--tint-navy-2)", color: "var(--jyg-navy)", fontSize: 12, flexShrink: 0 }}>{iniciales(e.nombre).slice(0, 1)}</span>
                 <span className="flex-grow-1" style={{ minWidth: 0 }}>
                   <span className="d-block font-display fw-semibold text-truncate" style={{ fontSize: 12.5 }}>{e.nombre}</span>
                   <span className="d-block" style={{ fontSize: 11, color: "var(--ink-faint)" }}>{e.pedido} · {e.ci || "S/C"} · saldo {t.saldo > 0 ? "$" + t.saldo.toFixed(2) : "pagado"}</span>
@@ -157,10 +164,10 @@ export default function Shell({ children }: { children: React.ReactNode }) {
       })}
       <div className="mt-auto" />
       <div className="user-card">
-        <span className="av">{user.nombre.split(" ").map((p) => p[0]).slice(0, 2).join("")}</span>
+        <span className="av">{iniciales(user?.nombre)}</span>
         <span className="user-txt">
-          <b>{user.nombre}</b>
-          <small><span className="live" />{ROL_LABEL[user.rol]}</small>
+          <b>{user?.nombre || "Usuario"}</b>
+          <small><span className="live" />{ROL_LABEL[user?.rol] || user?.rol || ""}</small>
         </span>
       </div>
     </>
@@ -223,10 +230,10 @@ export default function Shell({ children }: { children: React.ReactNode }) {
 
             <div className="position-relative">
               <button className="avatar-btn" onClick={() => { setProfOpen(!profOpen); setBellOpen(false); }} aria-label="Perfil">
-                <span className="av">{user.nombre.split(" ").map((p) => p[0]).slice(0, 2).join("")}</span>
+                <span className="av">{iniciales(user?.nombre)}</span>
                 <span className="d-none d-sm-block text-start">
-                  <span className="d-block font-display fw-semibold" style={{ fontSize: 12.5, lineHeight: 1.1 }}>{user.nombre}</span>
-                  <span className="d-block" style={{ fontSize: 10.5, color: "var(--ink-faint)" }}>{ROL_LABEL[user.rol]}</span>
+                  <span className="d-block font-display fw-semibold" style={{ fontSize: 12.5, lineHeight: 1.1 }}>{user?.nombre || "Usuario"}</span>
+                  <span className="d-block" style={{ fontSize: 10.5, color: "var(--ink-faint)" }}>{ROL_LABEL[user?.rol] || user?.rol || ""}</span>
                 </span>
                 <ChevronDown size={13} style={{ color: "var(--ink-faint)" }} />
               </button>
@@ -235,7 +242,7 @@ export default function Shell({ children }: { children: React.ReactNode }) {
                   <div className="px-3 py-2 font-display fw-semibold" style={{ fontSize: 12.5, borderBottom: "1px solid var(--line-soft)" }}>Cambiar usuario</div>
                   {db.usuarios.filter((u) => u.activo).map((u) => (
                     <button key={u.id} className="search-item" onClick={() => { setCurrentUser(u.id); setProfOpen(false); }}>
-                      <span className="d-flex align-items-center justify-content-center rounded-3 font-display fw-bold" style={{ width: 30, height: 30, background: u.id === user.id ? "var(--jyg-navy)" : "var(--tint-navy-2)", color: u.id === user.id ? "#ffd970" : "var(--jyg-navy)", fontSize: 11, flexShrink: 0 }}>{u.nombre.split(" ").map((p) => p[0]).slice(0, 2).join("")}</span>
+                      <span className="d-flex align-items-center justify-content-center rounded-3 font-display fw-bold" style={{ width: 30, height: 30, background: u.id === user.id ? "var(--jyg-navy)" : "var(--tint-navy-2)", color: u.id === user.id ? "#ffd970" : "var(--jyg-navy)", fontSize: 11, flexShrink: 0 }}>{iniciales(u.nombre)}</span>
                       <span className="flex-grow-1" style={{ minWidth: 0 }}>
                         <span className="d-block font-display fw-semibold" style={{ fontSize: 12.5 }}>{u.nombre}</span>
                         <span className="d-block" style={{ fontSize: 10.5, color: "var(--ink-faint)" }}>{ROL_LABEL[u.rol]}</span>
@@ -254,7 +261,7 @@ export default function Shell({ children }: { children: React.ReactNode }) {
             <div className="page">
               <div className="card p-5 text-center" style={{ maxWidth: 480, margin: "60px auto" }}>
                 <h3 className="font-display fw-bold">Acceso restringido</h3>
-                <p style={{ color: "var(--ink-soft)", fontSize: 13.5 }}>Tu rol <b>{ROL_LABEL[user.rol]}</b> no tiene permiso para ver este módulo.</p>
+                <p style={{ color: "var(--ink-soft)", fontSize: 13.5 }}>Tu rol <b>{ROL_LABEL[user?.rol] || user?.rol}</b> no tiene permiso para ver este módulo.</p>
                 <button className="btn btn-primary" onClick={() => setRoute("dashboard")}>Ir al Dashboard</button>
               </div>
             </div>
