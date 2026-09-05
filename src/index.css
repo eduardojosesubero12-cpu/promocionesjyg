@@ -549,9 +549,9 @@ html.dark .fab-ocr .fab-tip { background: #e8eef7; color: #101828; }
 .tarj-back-foot { position: absolute; left: 0; right: 0; bottom: 0; padding: .9mm 3.8mm; display: flex; justify-content: space-between; font-size: 5pt; letter-spacing: 1px; text-transform: uppercase; opacity: .66; font-weight: 600; background: rgba(0,0,0,.22); z-index: 2; }
 
 /* ---------- Ticket térmico ---------- */
-.ticket-capture { width: fit-content; margin: 0 auto; padding: 26px 26px 44px; border-radius: 20px; background: radial-gradient(130% 150% at 18% 0%, #f4f1ea, #e6e1d6 55%, #d8d2c4); box-shadow: inset 0 1px 0 rgba(255,255,255,.75), var(--shadow-2); }
+.ticket-capture { width: 100%; max-width: 420px; margin: 0 auto; padding: 26px 26px 44px; border-radius: 20px; background: radial-gradient(130% 150% at 18% 0%, #f4f1ea, #e6e1d6 55%, #d8d2c4); box-shadow: inset 0 1px 0 rgba(255,255,255,.75), var(--shadow-2); overflow: visible; }
 html.dark .ticket-capture { background: radial-gradient(130% 150% at 18% 0%, #1c1c30, #12121f 55%, #0b0b16); }
-.ticket { width: 300px; background: #fdfdf9; color: #20201c; font-family: "Courier New", ui-monospace, Menlo, monospace; font-size: 11px; line-height: 1.5; padding: 16px 15px 10px; position: relative; box-shadow: 0 20px 44px -16px rgba(15,23,42,.5); transition: transform .25s; }
+.ticket { width: 100%; min-width: 280px; background: #fdfdf9; color: #20201c; font-family: "Courier New", ui-monospace, Menlo, monospace; font-size: 11px; line-height: 1.5; padding: 16px 15px 10px; position: relative; box-shadow: 0 20px 44px -16px rgba(15,23,42,.5); transition: transform .25s; }
 .ticket:hover { transform: translateY(-3px); }
 .ticket-tear { height: 9px; background: linear-gradient(-135deg, #fdfdf9 5px, transparent 0) 0 0, linear-gradient(135deg, #fdfdf9 5px, transparent 0) 5px 0; background-size: 10px 9px; background-repeat: repeat-x; margin-top: -1px; }
 .t-center { text-align: center; } .t-bold { font-weight: 700; }
@@ -564,8 +564,8 @@ html.dark .ticket-capture { background: radial-gradient(130% 150% at 18% 0%, #1c
 .t-stamp { position: absolute; top: 42%; right: 6%; transform: rotate(-14deg); font-family: var(--poppins); font-weight: 800; font-size: 22px; letter-spacing: 3px; padding: 3px 12px; border: 3px double currentColor; border-radius: 6px; opacity: .85; pointer-events: none; }
 .t-stamp.pagado { color: var(--ok); } .t-stamp.saldo { color: var(--danger); }
 .t-qr { display: flex; flex-direction: column; align-items: center; gap: 6px; margin: 14px 0 10px; }
-.t-qr img { border-radius: 6px; box-shadow: 0 2px 8px rgba(0,0,0,.12); }
-.t-barcode { display: flex; justify-content: center; gap: 2px; height: 28px; margin-top: 8px; }
+.t-qr img { border-radius: 6px; box-shadow: 0 2px 8px rgba(0,0,0,.12); max-width: 100%; height: auto; }
+.t-barcode { display: flex; justify-content: center; gap: 2px; height: 28px; margin-top: 8px; overflow: visible; }
 .t-barcode i { background: #20201c; border-radius: 1px; }
 
 /* ---------- Portal ---------- */

@@ -1,9 +1,9 @@
-```
 # Compiled and build artifacts
 *.pyc
 __pycache__/
 *.o
 *.obj
+*.class
 *.exe
 *.dll
 *.so
@@ -22,18 +22,10 @@ venv/
 dist/
 build/
 target/
-.gradle/
 
 # Python specific
 *.pyc
 __pycache__/
-*.pyo
-*.pyd
-.Python
-*.so
-.Python
-*.egg-info/
-.eggs/
 .mypy_cache/
 .pytest_cache/
 .coverage
@@ -46,15 +38,13 @@ htmlcov/
 *.swp
 *.swo
 
-# OS generated files
-.DS_Store
-Thumbs.db
-
-# Editors
+# Editors and IDEs
 .vscode/
 .idea/
-*.swp
-*.swo
+
+# System files
+.DS_Store
+Thumbs.db
 
 # Compressed files
 *.zip
@@ -79,4 +69,11 @@ Thumbs.db
 *.tar.bz2
 *.tar.xz
 *.tar.zst
-```
+
+# Gradle
+.gradle/
+
+# Temporary files
+*.tmp
+*.temp
+*~
