@@ -1,7 +1,7 @@
 import React, { useMemo, useRef, useState } from "react";
 import QRCode from "react-qr-code";
 import { toJpeg } from "html-to-image";
-import { Check, Download, Printer, Smartphone } from "lucide-react";
+import { Check, Download, Printer, Smartphone, Globe } from "lucide-react";
 import { useApp } from "../lib/store";
 import type { Estudiante } from "../lib/data";
 import { PAQUETES, estudianteTotales, fmtBs, fmtFecha, fmtUSD, todayISO, waLink } from "../lib/data";
@@ -161,6 +161,45 @@ export default function Facturas() {
     success("Captura enviada");
   };
 
+  const descargarPortalHTML = () => {
+    if (!sel) return;
+    const html = generarPortalHTML(sel, escuelaDe(sel.escuelaId)?.nombre || "", tasa.usd);
+    const blob = new Blob([html], { type: "text/html" });
+    descargarBlob(blob, `portal-${sel.pedido}-${todayISO()}.html`);
+    toast("Portal HTML descargado", "ok");
+  };
+
+  const generarPortalHTML = (est: Estudiante, escuelaNombre: string, tasaHoy: number): string => {
+    const t = estudianteTotales(est);
+    const pagado = t.saldo <= 0.009;
+    const barcode = Array.from({ length: 28 }, (_, i) => (est.pedido.charCodeAt(i % est.pedido.length) + i * 7) % 3 + 1);
+    const qrValue = qrPayload(est, escuelaNombre);
+    return `<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Ticket ${est.pedido}</title>
+<style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:#f5f7fa;display:flex;align-items:center;justify-content:center;min-height:100vh;padding:20px}.ticket{max-width:400px;background:#fff;border-radius:16px;box-shadow:0 10px 40px rgba(0,0,0,.12);overflow:hidden}.ticket-header{background:linear-gradient(135deg,#104172,#0c3560);color:#fff;padding:20px;text-align:center}.ticket-header h2{font-size:18px;margin-bottom:4px}.ticket-header p{font-size:12px;opacity:.9}.ticket-body{padding:20px}.info-row{display:flex;justify-content:space-between;margin-bottom:10px;font-size:13px}.info-row .label{color:#6b7280}.info-row .value{font-weight:600;color:#1f2937}.divider{height:1px;background:#e5e7eb;margin:15px 0}.qr-section{text-align:center;padding:15px 0}.barcode{display:flex;justify-content:center;gap:2px;height:30px;margin-top:10px}.barcode i{background:#1f2937;border-radius:1px}.footer{text-align:center;padding:15px;font-size:12px;color:#6b7280;background:#f9fafb}.stamp{position:absolute;top:50%;right:20px;transform:rotate(-15deg);font-size:24px;font-weight:800;padding:5px 15px;border:3px double;border-radius:8px;opacity:.8}.stamp.pagado{color:#0aaa67;border-color:#0aaa67}.stamp.saldo{color:#e5342b;border-color:#e5342b}@media print{body{background:#fff}.ticket{box-shadow:none}}</style></head><body>
+<div class="ticket">
+<div class="ticket-header"><h2>${db.config.empresa.nombre}</h2><p>RIF: ${db.config.empresa.rif}</p><p>TICKET DE PAGO · Folio ${est.pedido}-${todayISO().replace(/-/g,"")}</p></div>
+<div class="ticket-body" style="position:relative">
+${pagado ? '<div class="stamp pagado">PAGADO</div>' : '<div class="stamp saldo">SALDO</div>'}
+<div class="info-row"><span class="label">Estudiante</span><span class="value">${est.nombre}</span></div>
+<div class="info-row"><span class="label">C.I.</span><span class="value">${est.ci || "S/C"}</span></div>
+<div class="info-row"><span class="label">Escuela</span><span class="value">${escuelaNombre || "—"}</span></div>
+<div class="info-row"><span class="label">Grado/Sección</span><span class="value">${est.grado} "${est.seccion}"</span></div>
+<div class="info-row"><span class="label">Representante</span><span class="value">${est.representante || "—"}</span></div>
+<div class="divider"></div>
+<div class="info-row"><span class="label">Paquete</span><span class="value">${PAQUETES[est.paqueteId].nombre} - ${fmtUSD(est.precioPaquete)}</span></div>
+${est.adicionales.map(a => `<div class="info-row"><span class="label">Adicional</span><span class="value">${a.cantidad}× ${a.producto} - ${fmtUSD(a.cantidad * a.precio)}</span></div>`).join("")}
+<div class="info-row" style="font-weight:700;border-top:1px dashed #e5e7eb;padding-top:10px"><span class="label">TOTAL</span><span class="value">${fmtUSD(t.total)}</span></div>
+<div class="info-row"><span class="label">Abonado</span><span class="value">${fmtUSD(t.abonado)}</span></div>
+<div class="info-row" style="color:${pagado ? "#0aaa67" : "#e5342b"};font-weight:700"><span class="label">${pagado ? "PAGADO" : "SALDO"}</span><span class="value">${fmtUSD(t.saldo)}</span></div>
+<div class="qr-section"><img src="https://api.qrserver.com/v1/create-qr-code/?size=120x120&data=${encodeURIComponent(qrValue)}" alt="QR" style="border-radius:8px"/>
+<div class="barcode">${barcode.map((w,i) => `<i style="width:${w}px"></i>`).join("")}</div>
+<p style="font-size:11px;color:#6b7280;margin-top:8px">Escanea para verificar</p></div>
+</div>
+<div class="footer"><p>¡Gracias por su compra! 🎓</p><p>Tasa: ${fmtBs(tasaHoy)} · Emitido: ${new Date().toLocaleTimeString("es-VE",{hour:"2-digit",minute:"2-digit"})}</p></div>
+</div>
+</body></html>`;
+  };
+
   const imprimir = () => {
     if (!sel) return;
     setPrintEst(sel);
@@ -175,11 +214,12 @@ export default function Facturas() {
           <div className="crumb">Operaciones</div>
           <h1>Facturación</h1>
           <p style={{ fontSize: 13.5, margin: "4px 0 0", color: "var(--ink-soft)" }}>
-            Ticket de pago estilo impresora térmica · descarga la captura <b>completa en JPG</b> o envíala directo por WhatsApp
+            Ticket de pago estilo impresora térmica · descarga la captura <b>completa en JPG</b>, envíala por WhatsApp o descarga el <b>Portal HTML</b>
           </p>
         </div>
         <div className="d-flex gap-2 flex-wrap">
           <button className="btn btn-ghost" onClick={descargarImagen} disabled={!sel || capturando}><Download size={15} /> Descargar JPG</button>
+          <button className="btn btn-ghost" onClick={descargarPortalHTML} disabled={!sel}><Globe size={15} /> Descargar Portal HTML</button>
           <button className="btn btn-primary" style={{ background: "linear-gradient(150deg,#25d366,#128c4b)", boxShadow: "0 8px 20px -8px rgba(37,211,102,0.55)" }} onClick={() => enviarImagen()} disabled={!sel || capturando}>
             <Smartphone size={15} /> {capturando ? "Capturando…" : "Enviar captura por WhatsApp"}
           </button>
@@ -220,6 +260,7 @@ export default function Facturas() {
               </div>
               <div className="d-flex justify-content-center gap-2 mt-3 flex-wrap">
                 <button className="btn btn-soft btn-sm" onClick={imprimir}><Printer size={14} /> Imprimir ticket</button>
+                <button className="btn btn-soft btn-sm" onClick={descargarPortalHTML}><Globe size={14} /> Descargar Portal HTML</button>
                 {sel.telefono && (
                   <button className="btn btn-sm" style={{ background: "var(--tint-ok)", color: "#128c4b", border: "1.5px solid rgba(37,211,102,0.4)" }} onClick={() => enviarImagen(sel)}>
                     <Smartphone size={14} /> Enviar al {sel.representante ? "representante" : "estudiante"} · {sel.telefono}
