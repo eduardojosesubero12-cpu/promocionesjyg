@@ -9,7 +9,7 @@ import { EmptyState, useNow } from "../components/ui";
 
 const qrPayload = (e: Estudiante, escuela: string) => {
   const t = estudianteTotales(e);
-  return ["JYG", e.pedido, e.nombre, e.ci || "S/C", escuela, `${e.grado} "${e.seccion}"`,
+  return ["JYG", e.nombre, e.ci || "S/C", escuela, `${e.grado} "${e.seccion}"`,
     `Paq.${PAQUETES[e.paqueteId].nombre}`, `Total ${fmtUSD(t.total)}`, `Abonado ${fmtUSD(t.abonado)}`, `Saldo ${fmtUSD(t.saldo)}`].join("|");
 };
 

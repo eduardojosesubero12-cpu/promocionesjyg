@@ -563,6 +563,10 @@ html.dark .ticket-capture { background: radial-gradient(130% 150% at 18% 0%, #1c
 .t-section { letter-spacing: 1.5px; font-weight: 700; font-size: 10px; color: #4c4a42; }
 .t-stamp { position: absolute; top: 42%; right: 6%; transform: rotate(-14deg); font-family: var(--poppins); font-weight: 800; font-size: 22px; letter-spacing: 3px; padding: 3px 12px; border: 3px double currentColor; border-radius: 6px; opacity: .85; pointer-events: none; }
 .t-stamp.pagado { color: var(--ok); } .t-stamp.saldo { color: var(--danger); }
+.t-qr { display: flex; flex-direction: column; align-items: center; gap: 6px; margin: 14px 0 10px; }
+.t-qr img { border-radius: 6px; box-shadow: 0 2px 8px rgba(0,0,0,.12); }
+.t-barcode { display: flex; justify-content: center; gap: 2px; height: 28px; margin-top: 8px; }
+.t-barcode i { background: #20201c; border-radius: 1px; }
 
 /* ---------- Portal ---------- */
 .portal { min-height: 100vh; background: radial-gradient(900px 420px at 85% -8%, rgba(207,232,255,.12), transparent 60%), radial-gradient(700px 380px at -8% 12%, rgba(245,179,1,.1), transparent 60%), #0c1a2c; color: #e8eef8; }
