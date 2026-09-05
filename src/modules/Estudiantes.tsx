@@ -131,7 +131,7 @@ function EstudianteForm({ initial, onClose }: { initial: Partial<Estudiante>; on
   const { db, saveEstudiante, success, ocrDraft, setOcrDraft, tasa } = useApp();
   const [f, setF] = useState<Estudiante>(() => {
     const base = { ...nuevo(db.seqPedido), ...initial } as Estudiante;
-    if (ocrDraft?.nombre && !base.nombre) base.nombre = ocrDraft.nombre;
+    if (ocrDraft?.nombres && !base.nombre) base.nombre = ocrDraft.nombres;
     if (ocrDraft?.ci && !base.ci) base.ci = ocrDraft.ci;
     return base;
   });

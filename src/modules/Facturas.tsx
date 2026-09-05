@@ -84,7 +84,6 @@ function Ticket({ est, escuelaNombre, tasaHoy }: { est: Estudiante; escuelaNombr
           <span className="t-sm t-muted">Escanea para verificar</span>
         </div>
         <div className="t-barcode">{barcode.map((w, i) => <i key={i} style={{ width: w }} />)}</div>
-        <div className="t-center t-sm t-muted">{est.pedido}</div>
         <hr className="t-dashed" />
         <div className="t-center t-sm">¡Gracias por su compra! 🎓</div>
         <div className="t-center t-sm t-muted">Tasa del día {fmtBs(tasaHoy)} · emitido {new Date(now).toLocaleTimeString("es-VE", { hour: "2-digit", minute: "2-digit" })}</div>
