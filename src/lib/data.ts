@@ -885,8 +885,8 @@ export const SEED_CONFIG: Config = {
   usarApi: true, usarTasaManual: false, tasaFallback: 352.4, tasaManualUSD: 352.4, tasaManualEUR: 384.1,
   historialAuto: true,
   /* Conexión Supabase del equipo JyG (clave pública de publicación — segura en el cliente) */
-  supabaseUrl: "https://vvbvfvdjlmyujbpeorpn.supabase.co",
-  supabaseKey: "sb_publishable_n__jpo0Rdx5q9a-MY6NqrQ_SKyp4NCN",
+  supabaseUrl: "https://kdzofrxquzhtixzjtgmx.supabase.co",
+  supabaseKey: "sb_publishable_ibQlrVHQi9oqKd5iw3X3CA_fpSMjzFq",
   autoSyncCloud: true,
   /* La API key se configura desde Configuración y se guarda en Supabase (nunca en el código) */
   openRouterKey: "", openRouterModel: OPENROUTER_MODELOS[0].id,
