@@ -70,8 +70,16 @@ export interface Config {
   secciones?: string[];
   tallas?: string[];
 }
-export interface CatAdicional { nombre: string; precio: number; talla: "" | "letras" | "numerica"; }
+export interface CatAdicional { nombre: string; precio: number; talla: "" | "letras" | "numerica"; tallaNumerica?: boolean; }
 export interface OcrDraft { ci: string; nombres: string; apellidos: string; fecha: string; raw?: string; }
+export interface PlantillaMensaje { id: string; nombre: string; texto: string; }
+export const PLANTILLAS_MENSAJE: PlantillaMensaje[] = [
+  { id: "recordatorio", nombre: "Recordatorio de pago", texto: "Hola {nombre}, te recordamos que tienes un saldo pendiente de {saldo}. Puedes pagar en nuestro horario de atención." },
+  { id: "entrega", nombre: "Entrega de paquete", texto: "Estimado representante, el paquete de {nombre} está listo para entrega. Acércate con tu cédula." },
+  { id: "sesion", nombre: "Cita de sesión fotográfica", texto: "La sesión fotográfica de {escuela} será el {fecha} a las {hora}. ¡No falten!" },
+];
+export const OCR_CRED = { correo: "ocr-service@jyg.com.ve", activo: true };
+export function parseOcr(texto: string): OcrDraft { return parseOcrLocal(texto); }
 
 /* ---- Registros por módulo (una tabla por módulo en Supabase) ---- */
 export interface FacturaLog { id: string; numero: string; estudianteId: string; estudiante: string; fecha: string; total: number; accion: string; }

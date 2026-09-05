@@ -170,10 +170,10 @@ export function OcrModal() {
             </div>
           ) : (
             <div className="d-flex flex-column gap-3">
-              <Field label="Nombre detectado"><input className="input" value={draft.nombre} onChange={(e) => setDraft({ ...draft, nombre: e.target.value })} /></Field>
+              <Field label="Nombres detectados"><input className="input" value={draft.nombres} onChange={(e) => setDraft({ ...draft, nombres: e.target.value })} /></Field>
               <div className="row g-3">
-                <Field label="Cédula" className="col-6"><input className="input" value={draft.ci} onChange={(e) => setDraft({ ...draft, ci: e.target.value })} /></Field>
-                <Field label="Fecha" className="col-6"><input className="input" value={draft.fecha} onChange={(e) => setDraft({ ...draft, fecha: e.target.value })} /></Field>
+                <Field span="c-6" label="Cédula"><input className="input" value={draft.ci} onChange={(e) => setDraft({ ...draft, ci: e.target.value })} /></Field>
+                <Field span="c-6" label="Fecha"><input className="input" value={draft.fecha} onChange={(e) => setDraft({ ...draft, fecha: e.target.value })} /></Field>
               </div>
               {draft.raw && (
                 <div>
