@@ -481,7 +481,7 @@ export function Clientes() {
 }
 
 /* ============================================================
-   VENTAS · PEDIDOS
+   PAGOS · PEDIDOS
    ============================================================ */
 export function Ventas() {
   const { db, setRoute, deleteEstudiante, confirm, toast, tasa } = useApp();
@@ -497,7 +497,7 @@ export function Ventas() {
   return (
     <div className="page">
       <div className="page-head">
-        <div><div className="crumb">CRM</div><h1>Ventas · Pedidos</h1><p style={{ fontSize: 13.5, margin: "4px 0 0", color: "var(--ink-soft)" }}>Cada estudiante tiene un pedido con su pipeline de producción</p></div>
+        <div><div className="crumb">CRM</div><h1>Pagos · Pedidos</h1><p style={{ fontSize: 13.5, margin: "4px 0 0", color: "var(--ink-soft)" }}>Cada estudiante tiene un pedido con su pipeline de producción</p></div>
         <button className="btn btn-primary" onClick={() => setRoute("estudiantes", { openNew: true })}><Plus size={15} /> Nuevo pedido</button>
       </div>
       <div className="row g-2 mb-3">
@@ -539,7 +539,7 @@ export function Ventas() {
 }
 
 /* ============================================================
-   COTIZACIONES
+   PAGOS
    ============================================================ */
 const cotVacia = (seq: number): Cotizacion => ({ id: "", numero: `COT-${seq}`, fecha: todayISO(), cliente: "", telefono: "", escuela: "", paqueteId: "premium", adicionales: [], estado: "Pendiente", nota: "" });
 export function Cotizaciones() {
@@ -567,7 +567,7 @@ export function Cotizaciones() {
   return (
     <div className="page">
       <div className="page-head">
-        <div><div className="crumb">CRM</div><h1>Cotizaciones / Ventas</h1><p style={{ fontSize: 13.5, margin: "4px 0 0", color: "var(--ink-soft)" }}>Presupuestos que se convierten en pedidos con un clic</p></div>
+        <div><div className="crumb">CRM</div><h1>Pagos</h1><p style={{ fontSize: 13.5, margin: "4px 0 0", color: "var(--ink-soft)" }}>Presupuestos que se convierten en pedidos con un clic</p></div>
         <button className="btn btn-primary" onClick={() => { setErrs({}); setForm(cotVacia(db.seqCot)); }}><Plus size={15} /> Nueva cotización</button>
       </div>
       <div className="row g-3">

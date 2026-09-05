@@ -27,7 +27,7 @@ const ICONOS_MODULO: Record<string, LucideIcon> = {
 
 export const ROUTE_TITLE: Record<Route, string> = {
   dashboard: "Dashboard", clientes: "Clientes", escuelas: "Escuelas", docentes: "Profesores",
-  estudiantes: "Estudiantes", ventas: "Ventas · Pedidos", paquetes: "Paquetes", cotizaciones: "Cotizaciones",
+  estudiantes: "Estudiantes", ventas: "Pagos", paquetes: "Paquetes", cotizaciones: "Pagos",
   mensajes: "Mensajes", sesiones: "Sesiones Fotográficas", agenda: "Agenda / Calendario",
   produccion: "Producción", qr: "Tarjetas QR", facturas: "Facturación", ocr: "Escáner Inteligente",
   reportes: "Reportes", usuarios: "Usuarios", config: "Configuración", integraciones: "Integraciones",
