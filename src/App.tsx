@@ -8,6 +8,7 @@ import Paquetes from "./modules/Paquetes";
 import { Sesiones, Agenda, Produccion, EtiquetasQRPage, OcrModal, OcrPage, Facturas } from "./modules/Operaciones";
 import { Reportes, Usuarios, Configuracion, Integraciones } from "./modules/Admin";
 import Login from "./modules/Login";
+import { SpeedInsights } from "@vercel/speed-insights/react";
 
 const ROUTES: Record<Route, React.ComponentType> = {
   dashboard: Dashboard, clientes: Clientes, escuelas: Escuelas, docentes: Docentes,
@@ -71,6 +72,7 @@ export default function App() {
         <ConfirmHost />
         <SuccessHost />
         <ToastHost />
+        <SpeedInsights />
       </AppProvider>
     </ErrorBoundary>
   );
