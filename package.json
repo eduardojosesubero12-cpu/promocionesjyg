@@ -13,6 +13,7 @@
     "@dnd-kit/utilities": "^3.2.2",
     "@supabase/supabase-js": "^2.112.4",
     "@types/qrcode": "^1.5.6",
+    "@vercel/speed-insights": "^2.0.0",
     "bootstrap": "^5.3.8",
     "bootstrap-icons": "^1.13.1",
     "canvas-confetti": "^1.9.3",
