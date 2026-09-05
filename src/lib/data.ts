@@ -425,6 +425,7 @@ const ESQUEMA_TABLAS: { tabla: string; columnas: [string, string][] }[] = [
   ] },
   { tabla: "usuarios", columnas: [
     ["id", "text primary key"], ["nombre", "text default ''"], ["usuario", "text default ''"],
+    ["email", "text default ''"], ["password", "text default ''"], 
     ["rol", "text default 'operador'"], ["activo", "boolean default true"],
   ] },
   { tabla: "historial_tasas", columnas: [
@@ -554,7 +555,7 @@ create table if not exists mensajes (
   id text primary key, fecha text default '', destinatario text default '', telefono text default '', plantilla text default '', texto text default ''
 );
 create table if not exists usuarios (
-  id text primary key, nombre text default '', usuario text default '', rol text default 'operador', activo boolean default true
+  id text primary key, nombre text default '', usuario text default '', email text default '', password text default '', rol text default 'operador', activo boolean default true
 );
 create table if not exists historial_tasas (
   id text primary key, fecha text default '', usd numeric(12,4) default 0, euro numeric(12,4) default 0,

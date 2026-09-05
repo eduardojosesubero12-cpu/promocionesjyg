@@ -5,6 +5,11 @@ node_modules/
 # Build artifacts
 dist/
 
-# Package lock
-.node_modules/.package-lock.json
+# Environment
+.env
+.env.local
+.env.*
+
+# Editors
+.vscode/
 ```
