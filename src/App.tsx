@@ -1,4 +1,5 @@
 import React from "react";
+import { SpeedInsights } from "@vercel/speed-insights/react";
 import { AppProvider, useApp, type Route } from "./lib/store";
 import Shell from "./components/Shell";
 import { ConfirmHost, SuccessHost, ToastHost } from "./components/ui";
@@ -72,6 +73,7 @@ export default function App() {
         <SuccessHost />
         <ToastHost />
       </AppProvider>
+      <SpeedInsights />
     </ErrorBoundary>
   );
 }
