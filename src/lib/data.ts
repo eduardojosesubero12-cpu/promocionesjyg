@@ -5,7 +5,7 @@
 export type Rol = "admin" | "operador" | "produccion" | "cobranza";
 export type Route =
   | "dashboard" | "clientes" | "escuelas" | "docentes" | "estudiantes" | "ventas" | "paquetes"
-  | "cotizaciones" | "mensajes" | "sesiones" | "agenda" | "produccion" | "qr" | "facturas"
+  | "cotizaciones" | "mensajes" | "agenda" | "produccion" | "qr" | "facturas"
   | "ocr" | "reportes" | "usuarios" | "config" | "integraciones";
 
 export interface Pago { id: string; fecha: string; monto: number; metodo: string; bs: boolean; tasa: number; usd: number; referencia: string; observacion: string; }
@@ -89,7 +89,7 @@ export interface ProduccionLog { id: string; fecha: string; detalle: string; mat
 
 export interface CRMData {
   escuelas: Escuela[]; docentes: Docente[]; estudiantes: Estudiante[]; cotizaciones: Cotizacion[];
-  sesiones: Sesion[]; eventos: Evento[]; mensajes: MensajeLog[]; usuarios: Usuario[];
+  eventos: Evento[]; mensajes: MensajeLog[]; usuarios: Usuario[];
   historialTasas: HistorialTasa[]; paquetesEscuelas: PaqueteEscuela[]; config: Config;
   facturas: FacturaLog[]; tarjetas: TarjetaLog[]; escaneos: EscaneoLog[]; produccionLogs: ProduccionLog[];
   currentUserId: string; seqPedido: number; seqCot: number;
@@ -129,7 +129,7 @@ export const ROL_LABEL: Record<Rol, string> = { admin: "Administrador", operador
 export const ROL_DESC: Record<Rol, string> = {
   admin: "Control total del sistema: configuración, usuarios, reportes e integraciones.",
   operador: "Registra estudiantes, escuelas y profesores, y gestiona cotizaciones.",
-  produccion: "Visualiza materiales, cola de producción y sesiones fotográficas.",
+  produccion: "Visualiza materiales, cola de producción y agenda.",
   cobranza: "Gestiona pagos, abonos, saldos y facturación.",
 };
 export const ROLES_INFO: { id: Rol; label: string; desc: string; icon: string; color: string }[] = [
@@ -147,7 +147,7 @@ export const MODULOS_GRUPOS: { seccion: string; icon: string; items: { ruta: str
     { ruta: "cotizaciones", label: "Cotizaciones" }, { ruta: "mensajes", label: "Mensajes" },
   ] },
   { seccion: "Operaciones", icon: "gear-wide-connected", items: [
-    { ruta: "sesiones", label: "Sesiones Fotográficas" }, { ruta: "agenda", label: "Agenda / Calendario" },
+    { ruta: "agenda", label: "Agenda / Calendario" },
     { ruta: "produccion", label: "Producción" }, { ruta: "qr", label: "Tarjetas QR" },
     { ruta: "ocr", label: "Escáner Inteligente" }, { ruta: "facturas", label: "Facturación" },
   ] },
@@ -162,7 +162,7 @@ export const TODOS_MODULOS: string[] = MODULOS_GRUPOS.flatMap((g) => g.items.map
 export const ACCESOS_DEFAULT: Record<Rol, string[]> = {
   admin: [...TODOS_MODULOS],
   operador: ["dashboard", "clientes", "escuelas", "docentes", "estudiantes", "ventas", "paquetes", "cotizaciones", "mensajes", "qr", "ocr", "facturas"],
-  produccion: ["dashboard", "paquetes", "produccion", "qr", "sesiones", "agenda"],
+  produccion: ["dashboard", "paquetes", "produccion", "qr", "agenda"],
   cobranza: ["dashboard", "clientes", "estudiantes", "ventas", "facturas", "reportes", "mensajes"],
 };
 

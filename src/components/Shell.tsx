@@ -28,13 +28,13 @@ const ICONOS_MODULO: Record<string, LucideIcon> = {
 export const ROUTE_TITLE: Record<Route, string> = {
   dashboard: "Dashboard", clientes: "Clientes", escuelas: "Escuelas", docentes: "Profesores",
   estudiantes: "Estudiantes", ventas: "Ventas · Pedidos", paquetes: "Paquetes", cotizaciones: "Cotizaciones",
-  mensajes: "Mensajes", sesiones: "Sesiones Fotográficas", agenda: "Agenda / Calendario",
+  mensajes: "Mensajes", agenda: "Agenda / Calendario",
   produccion: "Producción", qr: "Tarjetas QR", facturas: "Facturación", ocr: "Escáner Inteligente",
   reportes: "Reportes", usuarios: "Usuarios", config: "Configuración", integraciones: "Integraciones",
 };
 const SECCION_DE: Record<Route, string> = {
   dashboard: "Inicio", clientes: "CRM", escuelas: "CRM", docentes: "CRM", estudiantes: "CRM",
-  ventas: "CRM", paquetes: "CRM", cotizaciones: "CRM", mensajes: "CRM", sesiones: "Operaciones",
+  ventas: "CRM", paquetes: "CRM", cotizaciones: "CRM", mensajes: "CRM",
   agenda: "Operaciones", produccion: "Operaciones", qr: "Operaciones", facturas: "Operaciones",
   ocr: "Operaciones", reportes: "Administración", usuarios: "Administración", config: "Sistema", integraciones: "Sistema",
 };
