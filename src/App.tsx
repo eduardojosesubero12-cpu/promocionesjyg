@@ -4,7 +4,7 @@ import { AppProvider, useApp, type Route } from "./lib/store";
 import Shell from "./components/Shell";
 import { ConfirmHost, SuccessHost, ToastHost } from "./components/ui";
 import Dashboard from "./modules/Dashboard";
-import { Escuelas, Docentes, Estudiantes, Clientes, Ventas, Cotizaciones, Mensajes } from "./modules/CRM";
+import { Escuelas, Docentes, Estudiantes, Clientes, Mensajes } from "./modules/CRM";
 import Paquetes from "./modules/Paquetes";
 import { Agenda, Produccion, EtiquetasQRPage, OcrModal, OcrPage, Facturas } from "./modules/Operaciones";
 import { Reportes, Usuarios, Configuracion, Integraciones } from "./modules/Admin";
@@ -13,7 +13,7 @@ import { SpeedInsights } from "@vercel/speed-insights/react";
 
 const ROUTES: Record<Route, React.ComponentType> = {
   dashboard: Dashboard, clientes: Clientes, escuelas: Escuelas, docentes: Docentes,
-  estudiantes: Estudiantes, ventas: Ventas, paquetes: Paquetes, cotizaciones: Cotizaciones,
+  estudiantes: Estudiantes, paquetes: Paquetes,
   mensajes: Mensajes, agenda: Agenda, produccion: Produccion,
   qr: EtiquetasQRPage, facturas: Facturas, ocr: OcrPage,
   reportes: Reportes, usuarios: Usuarios, config: Configuracion, integraciones: Integraciones,
