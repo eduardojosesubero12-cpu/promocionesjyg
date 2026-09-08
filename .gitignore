@@ -49,23 +49,4 @@ yarn-debug.log*
 yarn-error.log*
 node_modules/
 dist/
-build/
-.next/
-out/
-.nuxt/
-public/
-.nyc_output/
-coverage/
-*.lcov
-*.log
-*.tmp
-*.bak
-*.swp
-*~
-.DS_Store
-Thumbs.db
 ```
-
-Wait, I need to reconsider this. Looking at the input again, only `src/modules/Login.tsx` was modified, which is a TypeScript React component file. This appears to be just a source code file without any build artifacts, dependencies, or temporary files in the changes.
-
-Output: (nothing)

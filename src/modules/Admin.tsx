@@ -240,7 +240,15 @@ export function Usuarios() {
     if (form.id && nuevaPass && nuevaPass.length < 6) { toast("La nueva contraseña debe tener al menos 6 caracteres", "err"); return; }
     const ok = await confirm({ title: "¿Desea guardar este registro?", message: "Verifique la información antes de continuar.", confirmText: "Sí, Guardar" });
     if (!ok) return;
-    const password = nuevaPass ? await hashPass(nuevaPass) : form.password;
+    /* Si viene contraseña nueva, la hashea; si es usuario nuevo sin contraseña, usa la por defecto; si es edición sin nueva pass, mantiene la existente */
+    let password = form.password;
+    if (nuevaPass && nuevaPass.length >= 6) {
+      password = await hashPass(nuevaPass);
+    } else if (!form.id && !nuevaPass) {
+      /* Usuario nuevo sin contraseña explícita — usa default según rol */
+      const defaults: Record<Rol, string> = { admin: "JyG-Admin-2026", operador: "JyG-Operador-2026", produccion: "JyG-Produccion-2026", cobranza: "JyG-Cobranza-2026" };
+      password = await hashPass(defaults[form.rol]);
+    }
     saveUsuario({ ...form, email, id: form.id || uid(), password });
     success();
     setForm(null); setNuevaPass("");
@@ -405,14 +413,23 @@ export function Usuarios() {
             <Field label="Correo electrónico (inicio de sesión)" required span="c-12">
               <input className="input" type="email" placeholder="correo@jyg.com.ve" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value.trim().toLowerCase() })} />
             </Field>
-            <Field label={form.id ? "Nueva contraseña (deja vacío para mantener la actual)" : "Contraseña"} required={!form.id} span="c-12">
+            <Field label={form.id ? "Contraseña (deja vacío para mantener la actual)" : "Contraseña"} span="c-12">
               <div className="d-flex gap-2">
-                <input className="input flex-grow-1" type={verPass ? "text" : "password"} placeholder={form.id ? "••••••••" : "Mínimo 6 caracteres"} value={nuevaPass} onChange={(e) => setNuevaPass(e.target.value)} autoComplete="new-password" />
+                <input 
+                  className="input flex-grow-1" 
+                  type={verPass ? "text" : "password"} 
+                  placeholder={form.id ? "•••••••• (vacío = mantener)" : "Mínimo 6 caracteres"} 
+                  value={nuevaPass} 
+                  onChange={(e) => setNuevaPass(e.target.value)} 
+                  autoComplete="new-password" 
+                />
                 <button type="button" className="btn btn-ghost" style={{ flexShrink: 0 }} onClick={() => setVerPass(!verPass)} aria-label="Mostrar contraseña">{verPass ? <EyeOff size={15} /> : <Eye size={15} />}</button>
               </div>
             </Field>
             <div className="c-12" style={{ fontSize: 11.5, color: "var(--ink-faint)" }}>
-              El usuario entrará al CRM con su <b>correo</b> y <b>contraseña</b>, y verá solo los módulos permitidos para su rol <b>{ROL_LABEL[form.rol]}</b>. La contraseña se guarda cifrada.
+              {form.id 
+                ? "El usuario entrará al CRM con su <b>correo</b> y <b>contraseña</b>. Deja el campo vacío para mantener la contraseña actual." 
+                : "El usuario entrará al CRM con su <b>correo</b> y <b>contraseña</b>, y verá solo los módulos permitidos para su rol <b>{ROL_LABEL[form.rol]}</b>. La contraseña se guarda cifrada."}
             </div>
           </div>
           <FormFoot onCancel={() => setForm(null)} onSave={() => void guardarU()} />
