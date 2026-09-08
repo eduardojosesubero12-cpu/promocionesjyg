@@ -253,6 +253,50 @@ body::after {
 .lr-txt small { font-size: 11px; color: var(--ink-faint); }
 .lr-arrow { color: var(--ink-faint); font-size: 14px; flex-shrink: 0; }
 .login-hint { font-size: 11.5px; color: var(--ink-faint); text-align: center; margin: 20px 0 0; line-height: 1.5; }
+.login-creds {
+  margin-top: 22px;
+  padding: 18px 16px;
+  border-radius: 14px;
+  background: linear-gradient(160deg, rgba(11, 46, 82, 0.04), rgba(11, 46, 82, 0.02));
+  border: 1.5px solid rgba(11, 46, 82, 0.08);
+}
+.login-creds-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--poppins);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  color: var(--jyg-navy);
+  margin-bottom: 12px;
+}
+.login-cred-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+  font-size: 12px;
+}
+.login-cred-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--ink-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  min-width: 85px;
+}
+.login-cred-code {
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--jyg-navy);
+  background: rgba(255, 217, 112, 0.15);
+  padding: 4px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 217, 112, 0.3);
+  letter-spacing: 0.3px;
+}
 @media (max-width: 900px) {
   .login-root { grid-template-columns: 1fr; }
   .login-brand { display: none; }
