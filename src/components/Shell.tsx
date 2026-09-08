@@ -1,8 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
-  BarChart3, Bell, CalendarDays, Camera, ChevronDown, ChevronRight, FileText, GraduationCap,
+  BarChart3, Bell, CalendarDays, Camera, ChevronDown, ChevronRight, GraduationCap,
   LayoutDashboard, LogOut, Menu, MessageSquare, Moon, Package, Plug, QrCode, Receipt, ScanLine, School,
-  Search, Settings, ShoppingBag, Sun, UserCog, Users, Wallet, X, type LucideIcon,
+  Search, Settings, Sun, UserCog, Users, Wallet, X, type LucideIcon,
 } from "lucide-react";
 import { useApp } from "../lib/store";
 import type { Route } from "../lib/store";
@@ -19,22 +19,20 @@ const iniciales = (nombre?: string | null) => {
 /* Un icono propio para cada módulo (nítidos y consistentes en expandido y colapsado) */
 const ICONOS_MODULO: Record<string, LucideIcon> = {
   dashboard: LayoutDashboard, clientes: Users, escuelas: School, docentes: GraduationCap,
-  estudiantes: UserCog, ventas: ShoppingBag, paquetes: Package, cotizaciones: FileText,
-  mensajes: MessageSquare, sesiones: Camera, agenda: CalendarDays, produccion: BarChart3,
+  estudiantes: UserCog, paquetes: Package, mensajes: MessageSquare, sesiones: Camera, agenda: CalendarDays, produccion: BarChart3,
   qr: QrCode, facturas: Receipt, ocr: ScanLine, reportes: BarChart3, usuarios: Users,
   config: Settings, integraciones: Plug,
 };
 
 export const ROUTE_TITLE: Record<Route, string> = {
   dashboard: "Dashboard", clientes: "Clientes", escuelas: "Escuelas", docentes: "Profesores",
-  estudiantes: "Estudiantes", ventas: "Ventas · Pedidos", paquetes: "Paquetes", cotizaciones: "Cotizaciones",
-  mensajes: "Mensajes", agenda: "Agenda / Calendario",
+  estudiantes: "Estudiantes", paquetes: "Paquetes", mensajes: "Mensajes", agenda: "Agenda / Calendario",
   produccion: "Producción", qr: "Tarjetas QR", facturas: "Facturación", ocr: "Escáner Inteligente",
   reportes: "Reportes", usuarios: "Usuarios", config: "Configuración", integraciones: "Integraciones",
 };
 const SECCION_DE: Record<Route, string> = {
   dashboard: "Inicio", clientes: "CRM", escuelas: "CRM", docentes: "CRM", estudiantes: "CRM",
-  ventas: "CRM", paquetes: "CRM", cotizaciones: "CRM", mensajes: "CRM",
+  paquetes: "CRM", mensajes: "CRM",
   agenda: "Operaciones", produccion: "Operaciones", qr: "Operaciones", facturas: "Operaciones",
   ocr: "Operaciones", reportes: "Administración", usuarios: "Administración", config: "Sistema", integraciones: "Sistema",
 };

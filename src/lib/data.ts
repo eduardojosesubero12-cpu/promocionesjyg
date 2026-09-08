@@ -4,8 +4,8 @@
 
 export type Rol = "admin" | "operador" | "produccion" | "cobranza";
 export type Route =
-  | "dashboard" | "clientes" | "escuelas" | "docentes" | "estudiantes" | "ventas" | "paquetes"
-  | "cotizaciones" | "mensajes" | "agenda" | "produccion" | "qr" | "facturas"
+  | "dashboard" | "clientes" | "escuelas" | "docentes" | "estudiantes" | "paquetes"
+  | "mensajes" | "agenda" | "produccion" | "qr" | "facturas"
   | "ocr" | "reportes" | "usuarios" | "config" | "integraciones";
 
 export interface Pago { id: string; fecha: string; monto: number; metodo: string; bs: boolean; tasa: number; usd: number; referencia: string; observacion: string; }
@@ -143,8 +143,7 @@ export const MODULOS_GRUPOS: { seccion: string; icon: string; items: { ruta: str
   { seccion: "CRM", icon: "briefcase", items: [
     { ruta: "clientes", label: "Clientes" }, { ruta: "escuelas", label: "Escuelas" },
     { ruta: "docentes", label: "Profesores" }, { ruta: "estudiantes", label: "Estudiantes" },
-    { ruta: "ventas", label: "Ventas · Pedidos" }, { ruta: "paquetes", label: "Paquetes" },
-    { ruta: "cotizaciones", label: "Cotizaciones" }, { ruta: "mensajes", label: "Mensajes" },
+    { ruta: "paquetes", label: "Paquetes" }, { ruta: "mensajes", label: "Mensajes" },
   ] },
   { seccion: "Operaciones", icon: "gear-wide-connected", items: [
     { ruta: "agenda", label: "Agenda / Calendario" },
@@ -161,9 +160,9 @@ export const MODULOS_GRUPOS: { seccion: string; icon: string; items: { ruta: str
 export const TODOS_MODULOS: string[] = MODULOS_GRUPOS.flatMap((g) => g.items.map((i) => i.ruta));
 export const ACCESOS_DEFAULT: Record<Rol, string[]> = {
   admin: [...TODOS_MODULOS],
-  operador: ["dashboard", "clientes", "escuelas", "docentes", "estudiantes", "ventas", "paquetes", "cotizaciones", "mensajes", "qr", "ocr", "facturas"],
+  operador: ["dashboard", "clientes", "escuelas", "docentes", "estudiantes", "paquetes", "mensajes", "qr", "ocr", "facturas"],
   produccion: ["dashboard", "paquetes", "produccion", "qr", "agenda"],
-  cobranza: ["dashboard", "clientes", "estudiantes", "ventas", "facturas", "reportes", "mensajes"],
+  cobranza: ["dashboard", "clientes", "estudiantes", "facturas", "reportes", "mensajes"],
 };
 
 /* ============================================================
