@@ -6,7 +6,7 @@ import { ConfirmHost, SuccessHost, ToastHost } from "./components/ui";
 import Dashboard from "./modules/Dashboard";
 import { Escuelas, Docentes, Estudiantes, Clientes, Ventas, Cotizaciones, Mensajes } from "./modules/CRM";
 import Paquetes from "./modules/Paquetes";
-import { Sesiones, Agenda, Produccion, EtiquetasQRPage, OcrModal, OcrPage, Facturas } from "./modules/Operaciones";
+import { Agenda, Produccion, EtiquetasQRPage, OcrModal, OcrPage, Facturas } from "./modules/Operaciones";
 import { Reportes, Usuarios, Configuracion, Integraciones } from "./modules/Admin";
 import Login from "./modules/Login";
 import { SpeedInsights } from "@vercel/speed-insights/react";
@@ -14,7 +14,7 @@ import { SpeedInsights } from "@vercel/speed-insights/react";
 const ROUTES: Record<Route, React.ComponentType> = {
   dashboard: Dashboard, clientes: Clientes, escuelas: Escuelas, docentes: Docentes,
   estudiantes: Estudiantes, ventas: Ventas, paquetes: Paquetes, cotizaciones: Cotizaciones,
-  mensajes: Mensajes, sesiones: Sesiones, agenda: Agenda, produccion: Produccion,
+  mensajes: Mensajes, agenda: Agenda, produccion: Produccion,
   qr: EtiquetasQRPage, facturas: Facturas, ocr: OcrPage,
   reportes: Reportes, usuarios: Usuarios, config: Configuracion, integraciones: Integraciones,
 };
