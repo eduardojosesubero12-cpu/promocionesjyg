@@ -4,13 +4,11 @@ import { useApp } from "../lib/store";
 import { ROL_LABEL, ROL_DESC } from "../lib/data";
 import { ROLES_INFO } from "../lib/data";
 
-/* Credenciales de acceso rápido (para el primer uso) */
-export const CREDENCIALES_ACCESO = [
-  { rol: "admin" as const, email: "admin@jyg.com.ve", pass: "JyG-Admin-2026" },
-  { rol: "operador" as const, email: "registro@jyg.com.ve", pass: "JyG-Registro-2026" },
-  { rol: "produccion" as const, email: "produccion@jyg.com.ve", pass: "JyG-Produccion-2026" },
-  { rol: "cobranza" as const, email: "cobranza@jyg.com.ve", pass: "JyG-Cobranza-2026" },
-];
+/* Credenciales de administrador por defecto */
+export const CREDENCIALES_ADMIN = {
+  email: "admin@jyg.com.ve",
+  pass: "JyG-Admin-2026",
+};
 
 export default function Login() {
   const { login, db } = useApp();
@@ -101,27 +99,20 @@ export default function Login() {
             {cargando ? "Verificando…" : "Entrar al CRM"}
           </button>
 
-          <div className="login-divider"><span>Acceso rápido por rol</span></div>
-
-          <div className="login-roles">
-            {CREDENCIALES_ACCESO.map((c) => {
-              const info = ROLES_INFO.find((r) => r.id === c.rol);
-              return (
-                <button key={c.rol} type="button" className="login-role" onClick={() => acceder(c.email, c.pass)} disabled={cargando}>
-                  <span className="lr-ic" style={{ background: `color-mix(in srgb, ${info?.color} 15%, transparent)`, color: info?.color }}>
-                    <i className={`bi bi-${info?.icon}`} />
-                  </span>
-                  <span className="lr-txt">
-                    <b>{ROL_LABEL[c.rol]}</b>
-                    <small>{c.email}</small>
-                  </span>
-                  <i className="bi bi-chevron-right lr-arrow" />
-                </button>
-              );
-            })}
+          <div className="login-creds">
+            <div className="login-creds-title"><ShieldCheck size={14} /> Credenciales de Administrador</div>
+            <div className="login-cred-row">
+              <span className="login-cred-label">Usuario:</span>
+              <code className="login-cred-code">admin@jyg.com.ve</code>
+            </div>
+            <div className="login-cred-row">
+              <span className="login-cred-label">Contraseña:</span>
+              <code className="login-cred-code">JyG-Admin-2026</code>
+            </div>
+            <p className="login-hint" style={{ margin: "12px 0 0", fontSize: 11.5 }}>
+              Usa estas credenciales para ingresar como administrador y gestionar los demás usuarios desde <b>Administración → Usuarios</b>.
+            </p>
           </div>
-
-          <p className="login-hint">La contraseña se guarda cifrada. El primer acceso migra la clave de forma automática.</p>
         </form>
       </main>
     </div>
