@@ -109,6 +109,29 @@ export default function Login() {
               <span className="login-cred-label">Contraseña:</span>
               <code className="login-cred-code">JyG-Admin-2026</code>
             </div>
+            <button 
+              type="button" 
+              className="login-autofill-btn"
+              onClick={() => acceder(CREDENCIALES_ADMIN.email, CREDENCIALES_ADMIN.pass)}
+              style={{
+                marginTop: "12px",
+                width: "100%",
+                padding: "8px 12px",
+                background: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
+                color: "white",
+                border: "none",
+                borderRadius: "8px",
+                fontSize: "12px",
+                fontWeight: 600,
+                cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: "6px"
+              }}
+            >
+              <LogIn size={14} /> Autocompletar y entrar como Administrador
+            </button>
             <p className="login-hint" style={{ margin: "12px 0 0", fontSize: 11.5 }}>
               Usa estas credenciales para ingresar como administrador y gestionar los demás usuarios desde <b>Administración → Usuarios</b>.
             </p>
