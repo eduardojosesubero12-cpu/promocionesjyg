@@ -413,12 +413,12 @@ export function Usuarios() {
             <Field label="Correo electrónico (inicio de sesión)" required span="c-12">
               <input className="input" type="email" placeholder="correo@jyg.com.ve" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value.trim().toLowerCase() })} />
             </Field>
-            <Field label={form.id ? "Contraseña (deja vacío para mantener la actual)" : "Contraseña"} span="c-12">
+            <Field label={form.id ? "Contraseña (mantener la contraseña actual)" : "Contraseña"} span="c-12">
               <div className="d-flex gap-2">
                 <input 
                   className="input flex-grow-1" 
                   type={verPass ? "text" : "password"} 
-                  placeholder={form.id ? "•••••••• (vacío = mantener)" : "Mínimo 6 caracteres"} 
+                  placeholder={form.id ? "Contraseña actual guardada" : "Mínimo 6 caracteres"} 
                   value={nuevaPass} 
                   onChange={(e) => setNuevaPass(e.target.value)} 
                   autoComplete="new-password" 
@@ -428,7 +428,7 @@ export function Usuarios() {
             </Field>
             <div className="c-12" style={{ fontSize: 11.5, color: "var(--ink-faint)" }}>
               {form.id 
-                ? "El usuario entrará al CRM con su <b>correo</b> y <b>contraseña</b>. Deja el campo vacío para mantener la contraseña actual." 
+                ? "El usuario entrará al CRM con su <b>correo</b> y <b>contraseña</b>. La contraseña actual está guardada en el sistema." 
                 : "El usuario entrará al CRM con su <b>correo</b> y <b>contraseña</b>, y verá solo los módulos permitidos para su rol <b>{ROL_LABEL[form.rol]}</b>. La contraseña se guarda cifrada."}
             </div>
           </div>
