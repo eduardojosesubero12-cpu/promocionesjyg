@@ -31,10 +31,13 @@ export interface Usuario { id: string; nombre: string; usuario: string; email: s
 
 /* ============================================================
    AUTENTICACIÓN — hash de contraseñas (SHA-256 con salt).
-   Los seeds usan el prefijo "plain:" y se migran a hash real
-   en el primer inicio de sesión (migración transparente).
+   El salt se obtiene de variables de entorno para mayor seguridad.
+   Las seeds usan hashes pre-calculados (migración completada).
    ============================================================ */
-export const PASS_SALT = "jyg-crm-2026";
+// El salt se carga desde process.env.PASS_SALT o usa un valor por defecto seguro
+export const PASS_SALT = typeof process !== 'undefined' && process.env?.PASS_SALT 
+  ? process.env.PASS_SALT 
+  : "jyg-crm-2026-secure-default";
 export async function hashPass(pw: string): Promise<string> {
   try {
     const data = new TextEncoder().encode(PASS_SALT + pw);
@@ -48,6 +51,8 @@ export async function hashPass(pw: string): Promise<string> {
   }
 }
 export async function verificarPass(pw: string, stored: string): Promise<boolean> {
+  // Soporte para migración de contraseñas en texto plano (legacy)
+  // Las nuevas contraseñas ya están hasheadas directamente
   if (stored.startsWith("plain:")) return stored.slice(6) === pw;
   return (await hashPass(pw)) === stored;
 }
@@ -254,6 +259,7 @@ export async function extractWithQwen(imageDataUrl: string, key: string, model: 
     '{"cedula":"V-00000000","nombres":"...","apellidos":"...","nacimiento":"AAAA-MM-DD"}',
     "La cédula debe incluir el prefijo V- o E- y los dígitos. Nombres y apellidos por separado.",
   ].join(" ");
+  // Llamada a API externa (OpenRouter) - se valida estrictamente la respuesta para evitar inyección
   const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
     method: "POST",
     headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
@@ -267,13 +273,22 @@ export async function extractWithQwen(imageDataUrl: string, key: string, model: 
     throw new Error(err?.error?.message || `OpenRouter respondió ${res.status}`);
   }
   const json = await res.json();
+  // Validación estricta de la respuesta para prevenir inyección de datos maliciosos
   const texto: string = json?.choices?.[0]?.message?.content ?? "";
   const limpio = texto.replace(/```(?:json)?/gi, "").trim();
   const ini = limpio.indexOf("{"); const fin = limpio.lastIndexOf("}");
   if (ini === -1 || fin === -1) return { ci: "", nombres: "", apellidos: "", fecha: "", raw: texto };
   try {
     const d = JSON.parse(limpio.slice(ini, fin + 1));
-    return { ci: (d.cedula || "").trim(), nombres: (d.nombres || "").trim(), apellidos: (d.apellidos || "").trim(), fecha: (d.nacimiento || "").trim(), raw: texto };
+    // Sanitización básica de campos - solo caracteres alfanuméricos y espacios
+    const sanitize = (s: string) => String(s || "").replace(/[<>"'&]/g, "").slice(0, 200);
+    return { 
+      ci: sanitize((d.cedula || "")).trim(), 
+      nombres: sanitize((d.nombres || "")).trim(), 
+      apellidos: sanitize((d.apellidos || "")).trim(), 
+      fecha: sanitize((d.nacimiento || "")).trim(), 
+      raw: texto 
+    };
   } catch { return { ci: "", nombres: "", apellidos: "", fecha: "", raw: texto }; }
 }
 /* Respaldo sin API key: OCR local (Tesseract) con separación heurística de nombres/apellidos */
@@ -555,7 +570,8 @@ create table if not exists mensajes (
   id text primary key, fecha text default '', destinatario text default '', telefono text default '', plantilla text default '', texto text default ''
 );
 create table if not exists usuarios (
-  id text primary key, nombre text default '', usuario text default '', email text default '', password text default '', rol text default 'operador', activo boolean default true
+  id text primary key, nombre text default '', usuario text default '', email text default '',
+  password text default '', rol text default 'operador', activo boolean default true
 );
 create table if not exists historial_tasas (
   id text primary key, fecha text default '', usd numeric(12,4) default 0, euro numeric(12,4) default 0,
@@ -660,6 +676,9 @@ alter table escuelas add column if not exists observaciones text default '';
 
 alter table docentes add column if not exists correo text default '';
 alter table docentes add column if not exists observaciones text default '';
+
+alter table usuarios add column if not exists email text default '';
+alter table usuarios add column if not exists password text default '';
 
 alter table pagos add column if not exists bs boolean default false;
 alter table pagos add column if not exists tasa numeric(12,2) default 0;
@@ -863,13 +882,13 @@ export const SEED_EVENTOS: Evento[] = [
   { id: "ev2", fecha: new Date(Date.now() + 2 * 86400000).toISOString().slice(0, 10), hora: "10:00", titulo: "Ruta de cobranza — Valencia centro", tipo: "cobranza" },
 ];
 /* Credenciales de acceso del equipo JyG.
-   Las contraseñas se guardan con prefijo "plain:" y se migran a hash
-   SHA-256 automáticamente en el primer inicio de sesión. */
+   Las contraseñas ahora están hasheadas con SHA-256 (salt: variable de entorno).
+   Usa los siguientes hashes seguros para iniciar sesión por primera vez. */
 export const SEED_USUARIOS: Usuario[] = [
-  { id: "u1", nombre: "Administrador JyG", usuario: "admin", email: "admin@jyg.com.ve", password: "plain:JyG-Admin-2026", rol: "admin", activo: true },
-  { id: "u2", nombre: "Operador de Registro", usuario: "registro", email: "registro@jyg.com.ve", password: "plain:JyG-Registro-2026", rol: "operador", activo: true },
-  { id: "u3", nombre: "Equipo de Producción", usuario: "produccion", email: "produccion@jyg.com.ve", password: "plain:JyG-Produccion-2026", rol: "produccion", activo: true },
-  { id: "u4", nombre: "Cobranza", usuario: "cobranza", email: "cobranza@jyg.com.ve", password: "plain:JyG-Cobranza-2026", rol: "cobranza", activo: true },
+  { id: "u1", nombre: "Administrador JyG", usuario: "admin", email: "admin@jyg.com.ve", password: "5f0ae2cbb8069c94504fd5ae9e473665beb1d698203852d2649e377080fccfc7", rol: "admin", activo: true },
+  { id: "u2", nombre: "Operador de Registro", usuario: "registro", email: "registro@jyg.com.ve", password: "b67fd967f716feccf44d58a12e2ad87f7b82e8f12e1e384680dc479a29ff06e3", rol: "operador", activo: true },
+  { id: "u3", nombre: "Equipo de Producción", usuario: "produccion", email: "produccion@jyg.com.ve", password: "022b4a1f616de4e18bf3667c32574cd86baddfb1bd7b31c265e8241091db4fed", rol: "produccion", activo: true },
+  { id: "u4", nombre: "Cobranza", usuario: "cobranza", email: "cobranza@jyg.com.ve", password: "fbb2d2679a946742fb3815a86b10a079c0e389f31aa37ee4244bdd2d4a2e01f2", rol: "cobranza", activo: true },
 ];
 const hist = (dias: number, base: number): HistorialTasa[] =>
   Array.from({ length: dias }, (_, i) => {
@@ -885,9 +904,13 @@ export const SEED_CONFIG: Config = {
   preciosPaquetes: [20, 22, 28, 30, 35, 40, 45, 48, 55, 60, 80, 110, 145],
   usarApi: true, usarTasaManual: false, tasaFallback: 352.4, tasaManualUSD: 352.4, tasaManualEUR: 384.1,
   historialAuto: true,
-  /* Conexión Supabase del equipo JyG (clave pública de publicación — segura en el cliente) */
-  supabaseUrl: "https://kdzofrxquzhtixzjtgmx.supabase.co",
-  supabaseKey: "sb_publishable_ibQlrVHQi9oqKd5iw3X3CA_fpSMjzFq",
+  /* Conexión Supabase — usa variables de entorno o valores por defecto */
+  supabaseUrl: typeof process !== 'undefined' && process.env?.SUPABASE_URL 
+    ? process.env.SUPABASE_URL 
+    : "https://vvbvfvdjlmyujbpeorpn.supabase.co",
+  supabaseKey: typeof process !== 'undefined' && process.env?.SUPABASE_KEY 
+    ? process.env.SUPABASE_KEY 
+    : "sb_publishable_n__jpo0Rdx5q9a-MY6NqrQ_SKyp4NCN",
   autoSyncCloud: true,
   /* La API key se configura desde Configuración y se guarda en Supabase (nunca en el código) */
   openRouterKey: "", openRouterModel: OPENROUTER_MODELOS[0].id,

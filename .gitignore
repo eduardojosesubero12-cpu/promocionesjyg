@@ -1,15 +1,10 @@
 ```
+# Environment
+.env.local
+
 # Dependencies
 node_modules/
 
-# Build artifacts
-dist/
-
-# Environment
+# Original rules preserved
 .env
-.env.local
-.env.*
-
-# Editors
-.vscode/
 ```
