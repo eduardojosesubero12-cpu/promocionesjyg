@@ -505,8 +505,21 @@ export const SUPABASE_SCHEMA_SEGURO = (() => {
     p.push(`end $$;`);
     p.push("");
   }
+  
+  // Insertar usuarios semilla con contraseñas hasheadas SHA-256
+  p.push("-- ═══ USUARIOS SEMILLA ═══");
+  p.push("-- Contraseñas hasheadas con SHA-256 + salt 'jyg-crm-2026'");
+  p.push("insert into usuarios (id, nombre, usuario, email, password, rol, activo) values");
+  p.push("  ('u1', 'Administrador JyG', 'admin', 'admin@jyg.com.ve', '5f0ae2cbb8069c94504fd5ae9e473665beb1d698203852d2649e377080fccfc7', 'admin', true),");
+  p.push("  ('u2', 'Operador de Registro', 'registro', 'registro@jyg.com.ve', 'b67fd967f716feccf44d58a12e2ad87f7b82e8f12e1e384680dc479a29ff06e3', 'operador', true),");
+  p.push("  ('u3', 'Equipo de Producción', 'produccion', 'produccion@jyg.com.ve', '022b4a1f616de4e18bf3667c32574cd86baddfb1bd7b31c265e8241091db4fed', 'produccion', true),");
+  p.push("  ('u4', 'Cobranza', 'cobranza', 'cobranza@jyg.com.ve', 'fbb2d2679a946742fb3815a86b10a079c0e389f31aa37ee4244bdd2d4a2e01f2', 'cobranza', true)");
+  p.push("on conflict (id) do update set nombre = excluded.nombre, usuario = excluded.usuario, email = excluded.email, rol = excluded.rol, activo = excluded.activo;");
+  p.push("");
+  
   p.push("-- ═══ LISTO ═══");
   p.push("-- Las 18 tablas están creadas, con RLS y tiempo real activos.");
+  p.push("-- Los usuarios semilla están insertados con contraseñas hasheadas.");
   p.push("-- En el CRM pulsa \"Verificar ahora\" y luego \"Subir base completa\".");
   return p.join("\n");
 })();
