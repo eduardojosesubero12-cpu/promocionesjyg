@@ -113,9 +113,19 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [confirmState, setConfirmState] = useState<ConfirmState | null>(null);
   const [successState, setSuccessState] = useState<{ title: string } | null>(null);
   const [toasts, setToasts] = useState<Toast[]>([]);
-  /* Sesión de usuario (persistida en el navegador) */
+  /* Sesión de usuario: inicio automático como Administrador */
   const [sesion, setSesion] = useState<Usuario | null>(() => {
-    try { const raw = localStorage.getItem("jyg-sesion"); return raw ? (JSON.parse(raw) as Usuario) : null; } catch { return null; }
+    try {
+      const raw = localStorage.getItem("jyg-sesion");
+      if (raw) return JSON.parse(raw) as Usuario;
+      // Si no hay sesión, crear automáticamente la del administrador
+      const admin = dbRef.current?.usuarios.find(u => u.rol === 'admin') || dbRef.current?.usuarios[0];
+      if (admin) {
+        localStorage.setItem("jyg-sesion", JSON.stringify(admin));
+        return admin;
+      }
+      return null;
+    } catch { return null; }
   });
   const [syncInfo, setSyncInfo] = useState<{ last: number; ok: boolean; msg: string } | null>(null);
   const [syncing, setSyncing] = useState(false);
