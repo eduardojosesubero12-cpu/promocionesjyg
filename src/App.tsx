@@ -7,7 +7,6 @@ import { Escuelas, Docentes, Estudiantes, Clientes, Mensajes } from "./modules/C
 import Paquetes from "./modules/Paquetes";
 import { Agenda, Produccion, EtiquetasQRPage, OcrModal, OcrPage, Facturas } from "./modules/Operaciones";
 import { Reportes, Usuarios, Configuracion, Integraciones } from "./modules/Admin";
-import Login from "./modules/Login";
 
 const ROUTES: Record<Route, React.ComponentType> = {
   dashboard: Dashboard, clientes: Clientes, escuelas: Escuelas, docentes: Docentes,
@@ -49,10 +48,8 @@ class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { err
   }
 }
 
-/* Gate de acceso: sin sesión iniciada solo se muestra la pantalla de login */
+/* Gate de acceso: inicio automático como Administrador */
 function Gate() {
-  const { sesion } = useApp();
-  if (!sesion) return <Login />;
   return (
     <>
       <Shell>
