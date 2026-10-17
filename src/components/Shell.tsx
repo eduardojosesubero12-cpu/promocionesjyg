@@ -1,13 +1,13 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   BarChart3, Bell, CalendarDays, Camera, ChevronDown, ChevronRight, GraduationCap,
-  LayoutDashboard, LogOut, Menu, MessageSquare, Moon, Package, Plug, QrCode, Receipt, ScanLine, School,
+  KeyRound, LayoutDashboard, LogOut, Menu, MessageSquare, Moon, Package, Plug, QrCode, Receipt, ScanLine, School,
   Search, Settings, Sun, UserCog, Users, Wallet, X, type LucideIcon,
 } from "lucide-react";
 import { useApp } from "../lib/store";
 import type { Route } from "../lib/store";
-import { MODULOS_GRUPOS, ROL_LABEL, fmtBs, fmtHaceSegundos, estudianteTotales } from "../lib/data";
-import { useNow } from "./ui";
+import { MODULOS_GRUPOS, PASS_REGLAS, ROL_LABEL, fmtBs, fmtHaceSegundos, estudianteTotales } from "../lib/data";
+import { Field, Modal, useNow } from "./ui";
 
 /* Iniciales seguras: nunca falla aunque el nombre venga vacío o indefinido */
 const iniciales = (nombre?: string | null) => {
@@ -112,7 +112,24 @@ function ThemeToggle() {
 }
 
 export default function Shell({ children }: { children: React.ReactNode }) {
-  const { route, setRoute, can, user, logout, alerts, setOcrOpen, tasa, refreshTasa, tasaLoading } = useApp();
+  const { route, setRoute, can, user, logout, alerts, setOcrOpen, tasa, refreshTasa, tasaLoading, cambiarMiPass, toast } = useApp();
+  /* Modal "Cambiar mi contraseña" — valida la actual y exige política fuerte */
+  const [passOpen, setPassOpen] = useState(false);
+  const [pActual, setPActual] = useState("");
+  const [pNueva, setPNueva] = useState("");
+  const [pRepetir, setPRepetir] = useState("");
+  const [passErr, setPassErr] = useState("");
+  const [passBusy, setPassBusy] = useState(false);
+  const guardarPass = async () => {
+    setPassErr("");
+    if (pNueva !== pRepetir) { setPassErr("La confirmación no coincide con la nueva contraseña."); return; }
+    setPassBusy(true);
+    const r = await cambiarMiPass(pActual, pNueva);
+    setPassBusy(false);
+    if (!r.ok) { setPassErr(r.error || "No se pudo cambiar la contraseña."); return; }
+    setPassOpen(false); setPActual(""); setPNueva(""); setPRepetir("");
+    toast("Contraseña actualizada y sincronizada a la nube ✔");
+  };
   const [mini, setMini] = useState(false);
   const [movil, setMovil] = useState(false);
   const [bellOpen, setBellOpen] = useState(false);
@@ -255,6 +272,10 @@ export default function Shell({ children }: { children: React.ReactNode }) {
                       <span className="flex-grow-1 font-display fw-semibold" style={{ fontSize: 12.5 }}>Gestionar usuarios y roles</span>
                     </button>
                   )}
+                  <button className="search-item" onClick={() => { setProfOpen(false); setPassOpen(true); }}>
+                    <KeyRound size={15} style={{ color: "var(--ink-faint)" }} />
+                    <span className="flex-grow-1 font-display fw-semibold" style={{ fontSize: 12.5 }}>Cambiar mi contraseña</span>
+                  </button>
                   <button className="search-item" onClick={() => { setProfOpen(false); logout(); }}>
                     <LogOut size={15} style={{ color: "var(--err, #e5342b)" }} />
                     <span className="flex-grow-1 font-display fw-semibold" style={{ fontSize: 12.5, color: "var(--err, #e5342b)" }}>Cerrar sesión</span>
@@ -264,6 +285,35 @@ export default function Shell({ children }: { children: React.ReactNode }) {
             </div>
           </div>
         </header>
+
+        {/* Modal: cambio seguro de la propia contraseña (valida actual + política fuerte) */}
+        <Modal open={passOpen} onClose={() => setPassOpen(false)} title="Cambiar mi contraseña">
+          <div className="f-grid">
+            <Field label="Contraseña actual" required span="c-12" error={passErr && passErr.includes("actual") ? passErr : undefined}>
+              <input className="input" type="password" autoComplete="current-password" value={pActual} onChange={(e) => setPActual(e.target.value)} />
+            </Field>
+            <Field label="Nueva contraseña" required span="c-12">
+              <input className="input" type="password" autoComplete="new-password" value={pNueva} onChange={(e) => setPNueva(e.target.value)} />
+            </Field>
+            <Field label="Repetir nueva contraseña" required span="c-12">
+              <input className="input" type="password" autoComplete="new-password" value={pRepetir} onChange={(e) => setPRepetir(e.target.value)} />
+            </Field>
+            <div className="c-12" style={{ fontSize: 11.5, color: "var(--ink-faint)" }}>
+              <div className="fw-semibold mb-1" style={{ fontSize: 12 }}>Requisitos de seguridad:</div>
+              {PASS_REGLAS.map((r) => {
+                const ok = r.test(pNueva);
+                return <div key={r.label} style={{ color: ok ? "var(--ok, #16a34a)" : "inherit" }}>{ok ? "✔" : "○"} {r.label}</div>;
+              })}
+              {passErr && !passErr.includes("actual") && <div className="mt-1" style={{ color: "var(--err, #e5342b)" }}>{passErr}</div>}
+            </div>
+          </div>
+          <div className="d-flex gap-2 justify-content-end mt-3">
+            <button className="btn btn-ghost" onClick={() => setPassOpen(false)}>Cancelar</button>
+            <button className="btn btn-primary" disabled={passBusy || !pActual || !pNueva || pNueva !== pRepetir} onClick={() => void guardarPass()}>
+              {passBusy ? "Guardando…" : "Guardar contraseña"}
+            </button>
+          </div>
+        </Modal>
 
         <main>
           {permitido ? children : (
