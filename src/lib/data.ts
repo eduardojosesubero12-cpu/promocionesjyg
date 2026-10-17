@@ -529,7 +529,7 @@ export const SUPABASE_SCHEMA_SEGURO = (() => {
   p.push("-- ═══ USUARIOS SEMILLA ═══");
   p.push("-- Contraseñas hasheadas con SHA-256 + salt 'jyg-crm-2026'");
   p.push("insert into usuarios (id, nombre, usuario, email, password, rol, activo) values");
-  p.push("  ('u1', 'Administrador JyG', 'admin', 'admin@jyg.com.ve', '5f0ae2cbb8069c94504fd5ae9e473665beb1d698203852d2649e377080fccfc7', 'admin', true),");
+  p.push("  ('u1', 'Administrador JyG', 'admin', 'admin@jyg.com.ve', '083254b9923c63f605facb1c6469a62c015d1c74aeade7c3b85ada15072ee5e3', 'admin', true),");
   p.push("  ('u2', 'Operador de Registro', 'registro', 'registro@jyg.com.ve', 'b67fd967f716feccf44d58a12e2ad87f7b82e8f12e1e384680dc479a29ff06e3', 'operador', true),");
   p.push("  ('u3', 'Equipo de Producción', 'produccion', 'produccion@jyg.com.ve', '022b4a1f616de4e18bf3667c32574cd86baddfb1bd7b31c265e8241091db4fed', 'produccion', true),");
   p.push("  ('u4', 'Cobranza', 'cobranza', 'cobranza@jyg.com.ve', 'fbb2d2679a946742fb3815a86b10a079c0e389f31aa37ee4244bdd2d4a2e01f2', 'cobranza', true)");
@@ -912,7 +912,7 @@ export const SEED_EVENTOS: Evento[] = [
    Las contraseñas se guardan con prefijo "plain:" y se migran a hash
    SHA-256 automáticamente en el primer inicio de sesión. */
 export const SEED_USUARIOS: Usuario[] = [
-  { id: "u1", nombre: "Administrador JyG", usuario: "admin", email: "admin@jyg.com.ve", password: "plain:JyG-Admin-2026", rol: "admin", activo: true },
+  { id: "u1", nombre: "Administrador JyG", usuario: "admin", email: "admin@jyg.com.ve", password: "plain:Promojyg13*", rol: "admin", activo: true },
   { id: "u2", nombre: "Operador de Registro", usuario: "registro", email: "registro@jyg.com.ve", password: "plain:JyG-Registro-2026", rol: "operador", activo: true },
   { id: "u3", nombre: "Equipo de Producción", usuario: "produccion", email: "produccion@jyg.com.ve", password: "plain:JyG-Produccion-2026", rol: "produccion", activo: true },
   { id: "u4", nombre: "Cobranza", usuario: "cobranza", email: "cobranza@jyg.com.ve", password: "plain:JyG-Cobranza-2026", rol: "cobranza", activo: true },

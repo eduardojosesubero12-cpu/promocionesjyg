@@ -397,12 +397,35 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }
     /* éxito → limpiar contador de bloqueos */
     try { const bl = JSON.parse(localStorage.getItem(BLOCK_KEY) || "{}"); delete bl[u.id]; localStorage.setItem(BLOCK_KEY, JSON.stringify(bl)); } catch { /* noop */ }
-    /* Migración transparente: si la contraseña estaba en "plain:", la guardamos hasheada */
-    if ((u.password || "").startsWith("plain:")) {
+    /* Reparación definitiva en la nube: si la clave se validó por la semilla de
+       emergencia pero la fila local/en Supabase quedó con un hash viejo o
+       corrupto, la sobrescribimos con el hash correcto de la contraseña actual.
+       Así el login deja de fallar para siempre en todos los dispositivos. */
+    const hashLocalOk = await verificarPass(password, u.password || "");
+    if (!hashLocalOk) {
+      const hashBueno = await hashPass(password);
+      if (u.password !== hashBueno) {
+        mutate((d) => ({ ...d, usuarios: d.usuarios.map((x) => (x.id === u.id ? { ...x, password: hashBueno } : x)) }));
+        try {
+          const { sbClient, subirUsuarioInmediato, SUPABASE_DEFAULTS } = await import("./supabase");
+          const cfg = dbRef.current.config;
+          const cli = sbClient((cfg.supabaseUrl || SUPABASE_DEFAULTS.url).trim(), (cfg.supabaseKey || SUPABASE_DEFAULTS.key).trim());
+          if (cli) await subirUsuarioInmediato(cli, { ...u, password: hashBueno });
+        } catch { /* sin nube: la reparación local basta por ahora */ }
+      }
+    } else if ((u.password || "").startsWith("plain:")) {
+      /* Migración transparente: si la contraseña estaba en "plain:", la guardamos hasheada */
       const hash = await hashPass(password);
       mutate((d) => ({ ...d, usuarios: d.usuarios.map((x) => (x.id === u.id ? { ...x, password: hash } : x)) }));
+      /* y también a la nube, para que otros dispositivos no dependan de la semilla */
+      try {
+        const { sbClient, subirUsuarioInmediato, SUPABASE_DEFAULTS } = await import("./supabase");
+        const cfg = dbRef.current.config;
+        const cli = sbClient((cfg.supabaseUrl || SUPABASE_DEFAULTS.url).trim(), (cfg.supabaseKey || SUPABASE_DEFAULTS.key).trim());
+        if (cli) await subirUsuarioInmediato(cli, { ...u, password: hash });
+      } catch { /* noop */ }
     }
-    setSesion(u);
+    setSesion({ ...u, password: (u.password || "").startsWith("plain:") ? await hashPass(password) : u.password });
     setDb((d) => ({ ...d, currentUserId: u.id }));
     setRouteState("dashboard");
     /* Flag "verified": solo se reanuda automáticamente si la contraseña fue validada aquí */
