@@ -1,8 +1,7 @@
-import React, { useState } from "react";
-import { GraduationCap, Mail, Lock, Eye, EyeOff, LogIn, ShieldCheck, Sparkles, AlertCircle, KeyRound, ArrowLeft, CheckCircle2, Copy } from "lucide-react";
+import React, { useEffect, useRef, useState } from "react";
+import { GraduationCap, Mail, Lock, Eye, EyeOff, LogIn, ShieldCheck, Sparkles, AlertCircle, KeyRound, ArrowLeft, CheckCircle2, Copy, CloudOff, Clock } from "lucide-react";
 import { useApp } from "../lib/store";
-import { ROL_LABEL, ROL_DESC, PASS_REGLAS } from "../lib/data";
-import { ROLES_INFO } from "../lib/data";
+import { PASS_REGLAS } from "../lib/data";
 
 /* Credenciales de administrador por defecto */
 export const CREDENCIALES_ADMIN = {
@@ -11,13 +10,21 @@ export const CREDENCIALES_ADMIN = {
 };
 
 export default function Login() {
-  const { login, db, solicitarRecuperacion, restablecerPass } = useApp();
-  const [email, setEmail] = useState("");
+  const { login, db, solicitarRecuperacion, restablecerPass, loginBoot } = useApp();
+  const [email, setEmail] = useState(() => {
+    try { return localStorage.getItem("jyg-login-recuerdame") || ""; } catch { return ""; }
+  });
+  const [recordar, setRecordar] = useState(() => {
+    try { return !!localStorage.getItem("jyg-login-recuerdame"); } catch { return false; }
+  });
   const [pass, setPass] = useState("");
   const [verPass, setVerPass] = useState(false);
   const [error, setError] = useState("");
   const [cargando, setCargando] = useState(false);
   const [shake, setShake] = useState(false);
+  /* Contador regresivo cuando la cuenta quedó bloqueada por intentos fallidos */
+  const [bloqueoSeg, setBloqueoSeg] = useState(0);
+  const inputRef = useRef<HTMLInputElement>(null);
   /* ---- Modo recuperación: login | rec-solicitar | rec-codigo ---- */
   const [modo, setModo] = useState<"login" | "rec-solicitar" | "rec-codigo">("login");
   const [recCorreo, setRecCorreo] = useState("");
@@ -29,6 +36,22 @@ export default function Login() {
   const [recOk, setRecOk] = useState(false);
   const [recVerNueva, setRecVerNueva] = useState(false);
 
+  /* Foco inicial: si hay correo recordado, salta directo a la contraseña */
+  useEffect(() => {
+    if (email) inputRef.current?.focus();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  /* Regresivo del bloqueo: se reactiva solo mientras haya tiempo pendiente */
+  useEffect(() => {
+    if (bloqueoSeg <= 0) return;
+    const t = setInterval(() => setBloqueoSeg((s) => {
+      if (s <= 1) { setError(""); return 0; }
+      return s - 1;
+    }), 1000);
+    return () => clearInterval(t);
+  }, [bloqueoSeg]);
+
   const enviar = async (e?: React.FormEvent, em?: string, pw?: string) => {
     e?.preventDefault();
     const correo = em ?? email;
@@ -37,7 +60,21 @@ export default function Login() {
     setCargando(true); setError("");
     const r = await login(correo, clave);
     setCargando(false);
-    if (!r.ok) { setError(r.error || "No se pudo iniciar sesión."); disparar(); return; }
+    if (!r.ok) {
+      const msg = r.error || "No se pudo iniciar sesión.";
+      setError(msg);
+      if (/Demasiados intentos/.test(msg)) {
+        const m = msg.match(/(\d+)\s*(minuto|segundo)/i);
+        if (m) setBloqueoSeg(m[2].toLowerCase().startsWith("min") ? Number(m[1]) * 60 : Number(m[1]));
+      }
+      disparar();
+      return;
+    }
+    /* Recordar correo (nunca la contraseña) si el usuario lo pidió */
+    try {
+      if (recordar) localStorage.setItem("jyg-login-recuerdame", correo.trim().toLowerCase());
+      else localStorage.removeItem("jyg-login-recuerdame");
+    } catch { /* noop */ }
     /* El gate de App detecta la sesión y entra al CRM */
   };
   const disparar = () => { setShake(true); setTimeout(() => setShake(false), 450); };
@@ -105,14 +142,25 @@ export default function Login() {
         <form className={`login-card ${shake ? "shake" : ""}`} onSubmit={enviar}>
           <div className="login-head">
             <h2>Iniciar sesión</h2>
-            <p>Accede con el correo y la contraseña de tu rol.</p>
+            <p>Accede con tu correo, usuario o alias (ej.: <b>admin</b>) y tu contraseña.</p>
           </div>
 
+          {/* Sincronizando con la nube al abrir el CRM: aviso transitorio */}
+          {!loginBoot.listo && (
+            <div style={{
+              display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, color: "#6d5a1e",
+              background: "rgba(255,217,112,.18)", border: "1px solid rgba(200,160,40,.35)",
+              borderRadius: 10, padding: "9px 12px", marginBottom: 14,
+            }}>
+              <CloudOff size={15} /> Conectando con Supabase… los usuarios se están cargando desde la nube.
+            </div>
+          )}
+
           <label className="login-field">
-            <span>Correo electrónico</span>
+            <span>Correo o usuario</span>
             <div className="login-input">
               <Mail size={16} />
-              <input type="email" placeholder="correo@jyg.com.ve" value={email} onChange={(e) => { setEmail(e.target.value); setError(""); }} autoComplete="username" />
+              <input ref={inputRef} type="text" placeholder="correo@jyg.com.ve o admin" value={email} onChange={(e) => { setEmail(e.target.value); setError(""); }} autoComplete="username" spellCheck={false} inputMode="email" />
             </div>
           </label>
 
@@ -120,14 +168,18 @@ export default function Login() {
             <span>Contraseña</span>
             <div className="login-input">
               <Lock size={16} />
-              <input type={verPass ? "text" : "password"} placeholder="••••••••••" value={pass} onChange={(e) => { setPass(e.target.value); setError(""); }} autoComplete="current-password" />
-              <button type="button" className="login-eye" onClick={() => setVerPass(!verPass)} aria-label="Mostrar contraseña">
+              <input type={verPass ? "text" : "password"} placeholder="••••••••••" value={pass} onChange={(e) => { setPass(e.target.value); setError(""); }} autoComplete="current-password" disabled={bloqueoSeg > 0} />
+              <button type="button" className="login-eye" onClick={() => setVerPass(!verPass)} aria-label={verPass ? "Ocultar contraseña" : "Mostrar contraseña"}>
                 {verPass ? <EyeOff size={16} /> : <Eye size={16} />}
               </button>
             </div>
           </label>
 
-          <div style={{ textAlign: "right", margin: "-4px 0 8px" }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", margin: "-4px 0 8px" }}>
+            <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12.5, color: "var(--ink-faint)", cursor: "pointer", userSelect: "none" }}>
+              <input type="checkbox" checked={recordar} onChange={(e) => setRecordar(e.target.checked)} style={{ accentColor: "#667eea" }} />
+              Recordarme
+            </label>
             <button
               type="button"
               onClick={() => { setRecCorreo(email); setModo("rec-solicitar"); setError(""); }}
@@ -139,29 +191,35 @@ export default function Login() {
 
           {error && (
             <div className="login-error">
-              <AlertCircle size={15} /> {error}
+              {bloqueoSeg > 0 ? <Clock size={15} /> : <AlertCircle size={15} />} {error}
+              {bloqueoSeg > 0 && (
+                <b style={{ marginLeft: 6, fontVariantNumeric: "tabular-nums" }}>
+                  ({Math.floor(bloqueoSeg / 60)}:{String(bloqueoSeg % 60).padStart(2, "0")})
+                </b>
+              )}
             </div>
           )}
 
-          <button type="submit" className="login-submit" disabled={cargando}>
+          <button type="submit" className="login-submit" disabled={cargando || bloqueoSeg > 0 || !email.trim() || !pass}>
             {cargando ? <span className="spinner" /> : <LogIn size={17} />}
-            {cargando ? "Verificando…" : "Entrar al CRM"}
+            {cargando ? "Verificando…" : bloqueoSeg > 0 ? "Espera un momento…" : "Entrar al CRM"}
           </button>
 
           <div className="login-creds">
             <div className="login-creds-title"><ShieldCheck size={14} /> Credenciales de Administrador</div>
             <div className="login-cred-row">
               <span className="login-cred-label">Usuario:</span>
-              <code className="login-cred-code">admin@jyg.com.ve</code>
+              <code className="login-cred-code">{CREDENCIALES_ADMIN.email}</code>
             </div>
             <div className="login-cred-row">
               <span className="login-cred-label">Contraseña:</span>
-              <code className="login-cred-code">JyG-Admin-2026</code>
+              <code className="login-cred-code">{verPass ? CREDENCIALES_ADMIN.pass : "••••••••••••••"}</code>
             </div>
             <button 
               type="button" 
               className="login-autofill-btn"
               onClick={() => acceder(CREDENCIALES_ADMIN.email, CREDENCIALES_ADMIN.pass)}
+              disabled={cargando || bloqueoSeg > 0}
               style={{
                 marginTop: "12px",
                 width: "100%",
@@ -179,7 +237,7 @@ export default function Login() {
                 gap: "6px"
               }}
             >
-              <LogIn size={14} /> Autocompletar y entrar como Administrador
+              <LogIn size={14} /> Entrar como Administrador (autocompletar)
             </button>
             <p className="login-hint" style={{ margin: "12px 0 0", fontSize: 11.5 }}>
               Usa estas credenciales para ingresar como administrador y gestionar los demás usuarios desde <b>Administración → Usuarios</b>.

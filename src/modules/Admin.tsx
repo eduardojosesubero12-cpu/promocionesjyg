@@ -1,16 +1,17 @@
 import React, { useMemo, useRef, useState } from "react";
 import {
-  AlertTriangle, BarChart3, Boxes, Check, Copy, Download, Eye, EyeOff, GraduationCap, History, KeyRound,
+  AlertTriangle, BarChart3, Boxes, Check, Code, Copy, Download, Eye, EyeOff, GraduationCap, History, KeyRound,
   Package, Pencil, Plug, Plus, RefreshCw, Save, ScanLine, ShieldCheck, Sparkles, Trash2, Upload, UserCog, Users, Wallet, X,
 } from "lucide-react";
 import { useApp } from "../lib/store";
 import type { CatAdicional, PaqueteEscuela, Rol, Usuario } from "../lib/data";
 import {
   ACCESOS_DEFAULT, API_DOLARES, API_EUROS, DB_TABLES, MODULOS_GRUPOS, OPENROUTER_MODELOS, ORDEN_MATERIALES,
-  PAQUETES, ROL_DESC, ROL_LABEL, ROLES_INFO, SEED_USUARIOS, SUPABASE_SCHEMA_SEGURO, TODOS_MODULOS,
+  PAQUETES, ROL_DESC, ROL_LABEL, ROLES_INFO, SEED_USUARIOS, SUPABASE_RLS_ESTRICTO_SQL, SUPABASE_SCHEMA_SEGURO, TODOS_MODULOS,
   computeProduccion, downloadFile, estudianteTotales, fmtBs, fmtFecha, fmtFechaHoraViva, fmtHaceSegundos,
   fmtUSD, getAdicionales, getGrados, getSecciones, getTallas, hashPass, toCSV, todayISO, uid, validarPassFuerte, verificarPass,
 } from "../lib/data";
+import { SUPABASE_SETUP_AUTOMATICO_SQL, SETUP_ADMIN_EMAIL, SETUP_ADMIN_PASS } from "../lib/setup";
 import {
   Badge, Bar, EmptyState, Field, FilterSelect, FormFoot, FormSec, Modal, SearchInput, SectionHead,
   Switch, Toolbar, estadoPagoTone, useNow,
@@ -933,6 +934,9 @@ export function Integraciones() {
   };
   const [syncAuthBusy, setSyncAuthBusy] = useState(false);
   const [syncAuthResumen, setSyncAuthResumen] = useState("");
+  const [verRls, setVerRls] = useState(false);
+  const [verSetup, setVerSetup] = useState(false);
+  const [rlsEstricto, setRlsEstricto] = useState(!!db.config.rlsEstricto);
   const ejecutarSyncAuth = async () => {
     setSyncAuthBusy(true);
     setSyncAuthResumen(await sincronizarAuthAhora(true));
@@ -1059,6 +1063,75 @@ export function Integraciones() {
                 {syncAuthResumen && <p className="mt-2 mb-0" style={{ fontSize: 11.5, fontFamily: "ui-monospace, monospace", color: "var(--ink)" }}>{syncAuthResumen}</p>}
               </div>
             )}
+
+            {/* ── CONFIGURACIÓN AUTOMÁTICA DE SUPABASE (script único) ── */}
+            <div className="mt-3 p-2 rounded" style={{ background: "rgba(99,102,241,.07)", border: "1px solid rgba(99,102,241,.3)" }}>
+              <div className="d-flex align-items-center gap-2 flex-wrap">
+                <Sparkles size={15} style={{ color: "#818cf8" }} />
+                <b style={{ fontSize: 12.5 }}>Configuración automática de Supabase (1 solo script)</b>
+                <Badge tone="blue">Tablas + Admin Auth + RLS estricta</Badge>
+              </div>
+              <p className="mt-1 mb-2" style={{ fontSize: 11.5, color: "var(--ink-soft)" }}>
+                Copia este SQL y ejecútalo una sola vez en <b>Supabase → SQL Editor → New query → Run</b>. Crea las 18 tablas,
+                registra al administrador <code>{SETUP_ADMIN_EMAIL}</code> como usuario real de Supabase Auth (con la contraseña definida
+                <code> {SETUP_ADMIN_PASS}</code>, hasheada con salt+bcrypt <b>en el servidor</b>), crea su fila espejo sin secretos
+                y activa todas las políticas RLS por rol. Es idempotente: puedes repetirlo sin perder datos.
+              </p>
+              <div className="d-flex gap-2 flex-wrap align-items-center">
+                <button className="btn btn-sm btn-soft" onClick={() => setVerSetup(!verSetup)}>
+                  <Code size={13} /> {verSetup ? "Ocultar SQL de configuración" : "Ver / copiar SQL de configuración automática"}
+                </button>
+                <button className="btn btn-gold btn-xs" onClick={() => { navigator.clipboard?.writeText(SUPABASE_SETUP_AUTOMATICO_SQL).then(() => toast("SQL de configuración copiado — pégalo en Supabase → SQL Editor", "ok")); }}>
+                  <Copy size={11} /> Copiar todo
+                </button>
+                <button className="btn btn-ghost btn-xs" style={{ background: "rgba(255,255,255,0.08)", color: "#a8c6e8", borderColor: "rgba(168,198,232,0.3)" }} onClick={() => { downloadFile("configurar-supabase-jyg.sql", SUPABASE_SETUP_AUTOMATICO_SQL, "text/plain"); toast("configurar-supabase-jyg.sql descargado", "ok"); }}>
+                  <Download size={11} /> Descargar .sql
+                </button>
+              </div>
+              {verSetup && (
+                <pre className="mt-2 p-3 rounded-3 overflow-auto" style={{ background: "#0d1524", color: "#a8c6e8", fontSize: 10.5, maxHeight: 300, fontFamily: "ui-monospace, Menlo, monospace" }}>{SUPABASE_SETUP_AUTOMATICO_SQL}</pre>
+              )}
+            </div>
+
+            {/* ── RLS ESTRICTA POR ROL (políticas de seguridad en Supabase) ── */}
+            <div className="mt-3 p-2 rounded" style={{ background: rlsEstricto ? "rgba(16,185,129,.07)" : "rgba(245,158,11,.07)", border: `1px solid ${rlsEstricto ? "rgba(16,185,129,.25)" : "rgba(245,158,11,.3)"}` }}>
+              <div className="d-flex align-items-center gap-2 flex-wrap">
+                <ShieldCheck size={15} style={{ color: rlsEstricto ? "var(--ok)" : "var(--warn)" }} />
+                <b style={{ fontSize: 12.5 }}>RLS estricta por rol (Supabase Auth + JWT)</b>
+                <Badge tone={rlsEstricto ? "green" : "amber"} dot>{rlsEstricto ? "Activada" : "Modo abierto (crm_all)"}</Badge>
+              </div>
+              <p className="mt-1 mb-2" style={{ fontSize: 11.5, color: "var(--ink-soft)" }}>
+                Con RLS estricta, la anon key deja de poder leer/escribir directo: solo entran sesiones autenticadas cuyo usuario está <b>activo</b> en la tabla usuarios.
+                Los operadores no pueden ver la tabla completa de usuarios ni cambiarse el rol; la configuración solo la edita el admin. Un usuario desactivado queda bloqueado <b>incluso con su token vigente</b>.
+              </p>
+              <div className="d-flex gap-2 flex-wrap align-items-center">
+                <button className="btn btn-sm btn-soft" onClick={() => setVerRls(!verRls)}>
+                  <Code size={13} /> {verRls ? "Ocultar SQL de RLS" : "Ver / copiar SQL de políticas RLS"}
+                </button>
+                <label className="d-flex align-items-center gap-2 ms-auto" style={{ fontSize: 12, color: "var(--ink-soft)", cursor: "pointer" }}>
+                  <Switch checked={rlsEstricto} onChange={(v) => {
+                    if (v && !sbSvc.trim()) { toast("Primero configura la service role key y sincroniza el equipo con Supabase Auth", "warn"); return; }
+                    setRlsEstricto(v); setConfig({ rlsEstricto: v });
+                    toast(v ? "Marca de RLS estricta activada — recuerda ejecutar el SQL en Supabase" : "Marca desactivada (modo abierto)", v ? "ok" : "warn");
+                  }} />
+                  Ya ejecuté el SQL en Supabase
+                </label>
+              </div>
+              {verRls && (
+                <div className="position-relative mt-2">
+                  <pre className="p-3 rounded-3 overflow-auto" style={{ background: "#0d1524", color: "#a8c6e8", fontSize: 10.5, maxHeight: 260, fontFamily: "ui-monospace, Menlo, monospace" }}>{SUPABASE_RLS_ESTRICTO_SQL}</pre>
+                  <div className="position-absolute d-flex gap-1" style={{ top: 10, right: 10 }}>
+                    <button className="btn btn-ghost btn-xs" style={{ background: "rgba(255,255,255,0.08)", color: "#a8c6e8", borderColor: "rgba(168,198,232,0.3)" }} onClick={() => { navigator.clipboard?.writeText(SUPABASE_RLS_ESTRICTO_SQL).then(() => toast("SQL de RLS copiado", "ok")); }}>
+                      <Copy size={11} /> Copiar
+                    </button>
+                    <button className="btn btn-ghost btn-xs" style={{ background: "rgba(255,255,255,0.08)", color: "#a8c6e8", borderColor: "rgba(168,198,232,0.3)" }} onClick={() => { downloadFile("rls-estricto-jyg.sql", SUPABASE_RLS_ESTRICTO_SQL, "text/plain"); toast("rls-estricto-jyg.sql descargado", "ok"); }}>
+                      <Download size={11} /> Descargar
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+
             <div className="d-flex gap-2 flex-wrap mt-3 align-items-center">
               <button className="btn btn-primary btn-sm" onClick={() => void guardarSb()}><Save size={14} /> Guardar credenciales</button>
               <button className="btn btn-ghost btn-sm" onClick={() => void probar()} disabled={test === "busy"}>

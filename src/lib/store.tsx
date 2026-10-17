@@ -9,7 +9,7 @@ import type {
   HistorialTasa, MensajeLog, OcrDraft, PaqueteEscuela, Pago, ProduccionLog, Rol, Route,
   Sesion, TarjetaLog, Usuario,
 } from "./data";
-import { SUPABASE_DEFAULTS, sbClient, loginAuth } from "./supabase";
+import { SUPABASE_DEFAULTS, sbClient, loginAuth, logoutAuth } from "./supabase";
 export type { Route, Rol };
 
 interface DB extends CRMData {}
@@ -60,6 +60,8 @@ interface Ctx {
   user: Usuario; can: (r: Route) => boolean; setCurrentUser: (id: string) => void;
   sesion: Usuario | null;
   login: (email: string, password: string) => Promise<{ ok: boolean; error?: string }>;
+  /* Progreso de la carga inicial de usuarios desde la nube (pantalla de login) */
+  loginBoot: { listo: boolean; cargando: boolean; motivo?: string };
   logout: () => void;
   cambiarMiPass: (actual: string, nueva: string) => Promise<{ ok: boolean; error?: string }>;
   solicitarRecuperacion: (correo: string) => Promise<{ ok: boolean; error?: string; codigo?: string }>;
@@ -145,6 +147,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       return null;
     } catch { return null; }
   });
+  /* Estado visible de la pantalla de login: progreso de carga inicial + aviso
+     cuando el correo no existe en la nube todavía (para no mostrar un falso
+     "credenciales incorrectas" mientras sincroniza). */
+  const [loginBoot, setLoginBoot] = useState<{ listo: boolean; cargando: boolean; motivo?: string }>({ listo: false, cargando: true });
   const [syncInfo, setSyncInfo] = useState<{ last: number; ok: boolean; msg: string } | null>(null);
   const [syncing, setSyncing] = useState(false);
   const confirmResolve = useRef<((v: boolean) => void) | null>(null);
@@ -320,36 +326,65 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     return sbClient(url, key, svc);
   }, []);
 
+  /* Cliente de SESIÓN Auth: usa la anon key (nunca la service role) para que
+     el JWT del usuario se emita y persista correctamente en producción. */
+  const authSessionClient = useCallback(() => {
+    const cfg = dbRef.current.config;
+    const url = (cfg.supabaseUrl || SUPABASE_DEFAULTS.url).trim();
+    const key = (cfg.supabaseKey || SUPABASE_DEFAULTS.key).trim();
+    if (!url || !key) return null;
+    return sbClient(url, key);
+  }, []);
+
   /* Inicio de sesión (correo + contraseña) */
   const login = useCallback(async (email: string, password: string): Promise<{ ok: boolean; error?: string }> => {
     /* Espera brevemente a que termine la carga inicial desde Supabase para
        validar contra los usuarios reales de la nube (evita falsos
        "credenciales incorrectas" al abrir el CRM recién desplegado). */
+    setLoginBoot((b) => ({ ...b, cargando: true }));
     for (let i = 0; i < 40 && !cloudReady.current; i++) await new Promise((r) => setTimeout(r, 100));
+    setLoginBoot({ listo: cloudReady.current, cargando: false });
     const lista = dbRef.current.usuarios.length > 0 ? dbRef.current.usuarios : SEED_USUARIOS;
     const correo = email.trim().toLowerCase();
-    /* Acepta correo o nombre de usuario */
-    const u = lista.find((x) => (x.email || "").toLowerCase() === correo || (x.usuario || "").toLowerCase() === correo);
-    if (!u) return { ok: false, error: "No existe un usuario con ese correo." };
+    /* Acepta correo, nombre de usuario o alias corto ("admin" ≈ admin@jyg.com.ve) */
+    const u =
+      lista.find((x) => (x.email || "").toLowerCase() === correo || (x.usuario || "").toLowerCase() === correo) ||
+      lista.find((x) => {
+        const dom = (x.email || "").split("@")[1] || "jyg.com.ve";
+        return (x.usuario || "").toLowerCase() === `${correo}@${dom}`;
+      });
+    if (!u) {
+      return {
+        ok: false,
+        error: cloudReady.current
+          ? "No existe un usuario con ese correo o usuario. Revisa la escritura o pídele al administrador que te registre."
+          : "Todavía no logramos leer los usuarios desde la nube. Verifica tu conexión e inténtalo de nuevo en unos segundos.",
+      };
+    }
     if (!u.activo) return { ok: false, error: "Este usuario está desactivado. Contacta al administrador." };
     /* BLOQUEO POR INTENTOS: tras 5 fallas seguidas se espera 1 minuto (por cuenta) */
     try {
       const bl = JSON.parse(localStorage.getItem(BLOCK_KEY) || "{}");
       const b = bl[u.id];
       if (b && b.hasta > Date.now()) {
-        const mins = Math.ceil((b.hasta - Date.now()) / 60000);
-        return { ok: false, error: `Demasiados intentos fallidos. Vuelve a intentar en ${mins} minuto(s).` };
+        const seg = Math.ceil((b.hasta - Date.now()) / 1000);
+        const t = seg > 60 ? `${Math.ceil(seg / 60)} minuto(s)` : `${seg} segundo(s)`;
+        return { ok: false, error: `Demasiados intentos fallidos. Vuelve a intentar en ${t}.` };
       }
     } catch { /* noop */ }
     /* MODO AUTOMÁTICO (Supabase Auth activo): la fuente de verdad es el
        esquema interno auth.users — Supabase valida bcrypt+salt en servidor y
-       emite JWT. La tabla espejo NO contiene contraseñas en este modo. */
+       emite JWT. La tabla espejo NO contiene contraseñas en este modo.
+       El signIn se hace con un cliente ANON persistente: así el JWT queda
+       guardado en localStorage (por proyecto) y la sesión sobrevive recargas
+       en Vercel, con auto-refresh del token. */
     const ac = authClient();
     if (ac && u.email) {
       let registrado = false;
       try { const { existeEnAuth } = await import("./supabase"); registrado = await existeEnAuth(ac, u.email); } catch { /* sin acceso admin: se usa la capa local */ }
       if (registrado) {
-        const r = await loginAuth(ac, u.email, password);
+        const sc = authSessionClient() || ac;
+        const r = await loginAuth(sc, u.email, password);
         if (!r.ok) {
           if (r.error === "incorrectas") return { ok: false, error: "La contraseña no coincide con la registrada en Supabase Auth. Recupérala con «¿Olvidaste tu contraseña?» o pide un restablecimiento al administrador." };
           return { ok: false, error: r.error ? `No se pudo validar con Supabase Auth: ${r.error}` : "No se pudo validar con Supabase Auth." };
@@ -383,35 +418,66 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       }
     }
     if (!valida) {
-      /* registrar intento fallido */
+      /* registrar intento fallido + avisar cuántos quedan antes del bloqueo */
+      let aviso = "";
       try {
         const bl = JSON.parse(localStorage.getItem(BLOCK_KEY) || "{}");
         const b = bl[u.id] || { n: 0, hasta: 0 };
         b.n += 1;
-        if (b.n >= 5) { b.hasta = Date.now() + 60 * 1000; b.n = 0; }
+        if (b.n >= 5) { b.hasta = Date.now() + 60 * 1000; b.n = 0; aviso = " Se bloqueará esta cuenta por 1 minuto tras el próximo intento."; }
+        else if (b.n === 4) aviso = " Te queda 1 intento antes de un bloqueo temporal de 1 minuto.";
         bl[u.id] = b;
         localStorage.setItem(BLOCK_KEY, JSON.stringify(bl));
       } catch { /* noop */ }
-      return { ok: false, error: "La contraseña es incorrecta." };
+      return { ok: false, error: "La contraseña es incorrecta." + aviso };
     }
     /* éxito → limpiar contador de bloqueos */
     try { const bl = JSON.parse(localStorage.getItem(BLOCK_KEY) || "{}"); delete bl[u.id]; localStorage.setItem(BLOCK_KEY, JSON.stringify(bl)); } catch { /* noop */ }
-    /* Migración transparente: si la contraseña estaba en "plain:", la guardamos hasheada */
-    if ((u.password || "").startsWith("plain:")) {
+    /* Reparación definitiva en la nube: si la clave se validó por la semilla de
+       emergencia pero la fila local/en Supabase quedó con un hash viejo o
+       corrupto, la sobrescribimos con el hash correcto de la contraseña actual.
+       Así el login deja de fallar para siempre en todos los dispositivos. */
+    const hashLocalOk = await verificarPass(password, u.password || "");
+    if (!hashLocalOk) {
+      const hashBueno = await hashPass(password);
+      if (u.password !== hashBueno) {
+        mutate((d) => ({ ...d, usuarios: d.usuarios.map((x) => (x.id === u.id ? { ...x, password: hashBueno } : x)) }));
+        try {
+          const { sbClient, subirUsuarioInmediato, SUPABASE_DEFAULTS } = await import("./supabase");
+          const cfg = dbRef.current.config;
+          const cli = sbClient((cfg.supabaseUrl || SUPABASE_DEFAULTS.url).trim(), (cfg.supabaseKey || SUPABASE_DEFAULTS.key).trim());
+          if (cli) await subirUsuarioInmediato(cli, { ...u, password: hashBueno });
+        } catch { /* sin nube: la reparación local basta por ahora */ }
+      }
+    } else if ((u.password || "").startsWith("plain:")) {
+      /* Migración transparente: si la contraseña estaba en "plain:", la guardamos hasheada */
       const hash = await hashPass(password);
       mutate((d) => ({ ...d, usuarios: d.usuarios.map((x) => (x.id === u.id ? { ...x, password: hash } : x)) }));
+      /* y también a la nube, para que otros dispositivos no dependan de la semilla */
+      try {
+        const { sbClient, subirUsuarioInmediato, SUPABASE_DEFAULTS } = await import("./supabase");
+        const cfg = dbRef.current.config;
+        const cli = sbClient((cfg.supabaseUrl || SUPABASE_DEFAULTS.url).trim(), (cfg.supabaseKey || SUPABASE_DEFAULTS.key).trim());
+        if (cli) await subirUsuarioInmediato(cli, { ...u, password: hash });
+      } catch { /* noop */ }
     }
-    setSesion(u);
+    setSesion({ ...u, password: (u.password || "").startsWith("plain:") ? await hashPass(password) : u.password });
     setDb((d) => ({ ...d, currentUserId: u.id }));
     setRouteState("dashboard");
     // Nota de seguridad: la sesión se guarda en localStorage para persistencia
     try { localStorage.setItem("jyg-sesion", JSON.stringify(u)); } catch { /* noop */ }
     return { ok: true };
-  }, [mutate, authClient]);
+  }, [mutate, authClient, authSessionClient]);
   const logout = useCallback(() => {
     setSesion(null);
     try { localStorage.removeItem("jyg-sesion"); } catch { /* noop */ }
-  }, []);
+    /* Cerrar también la sesión de Supabase Auth (elimina el JWT persistido y
+       detiene el auto-refresh): nadie queda con acceso residual en el equipo. */
+    try {
+      const sc = authSessionClient();
+      if (sc) void logoutAuth(sc);
+    } catch { /* noop */ }
+  }, [authSessionClient]);
 
   /* ---------- Gestión segura de contraseñas ----------
      cambiarMiPass: cada miembro cambia SU propia contraseña validando la actual.
@@ -616,8 +682,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   /* Supabase (carga perezosa del SDK) */
   const clienteSb = useCallback(async (urlArg?: string, keyArg?: string) => {
-    const url = (urlArg || dbRef.current.config.supabaseUrl || SUPABASE_DEFAULTS.url).trim();
-    const key = (keyArg || dbRef.current.config.supabaseKey || SUPABASE_DEFAULTS.key).trim();
+    const cfg = dbRef.current.config;
+    const url = (urlArg || cfg.supabaseUrl || SUPABASE_DEFAULTS.url).trim();
+    /* MODO AUTOMÁTICO + RLS ESTRICTA: la anon key queda bloqueada por las
+       políticas; toda lectura/escritura debe ir con la service role. */
+    const estricto = !!cfg.rlsEstricto && !urlArg && !!(cfg.supabaseServiceKey || "").trim();
+    const key = estricto ? (cfg.supabaseServiceKey || "").trim() : (keyArg || cfg.supabaseKey || SUPABASE_DEFAULTS.key).trim();
     if (!url || !key) return null;
     /* Si el usuario no configuró credenciales propias, usamos las del proyecto (.env) */
     if (url !== dbRef.current.config.supabaseUrl || key !== dbRef.current.config.supabaseKey) {
@@ -744,7 +814,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       if (!cfg.supabaseUrl || !cfg.supabaseKey) return;
       try {
         const { sbClient } = await import("./supabase");
-        const client = sbClient(cfg.supabaseUrl, cfg.supabaseKey);
+        /* Con RLS estricta, la anon key no puede suscribirse a los cambios:
+           se usa la service role (solo si está configurada). */
+        const rtKey = (!!cfg.rlsEstricto && (cfg.supabaseServiceKey || "").trim()) ? cfg.supabaseServiceKey!.trim() : cfg.supabaseKey;
+        const client = sbClient(cfg.supabaseUrl, rtKey);
         channel = client.channel("jyg-tiempo-real");
         channel.on("postgres_changes", { event: "*", schema: "public" }, () => {
           if (applyingRemote.current) return;
@@ -805,6 +878,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   /* Si el usuario con sesión fue eliminado o desactivado por un administrador, se cierra su sesión */
   useEffect(() => {
     if (!sesion) return;
+    /* Con RLS estricta la tabla "usuarios" solo expone la fila propia: una
+       lista vacía NO significa que el usuario fue borrado (sería un falso
+       positivo y expulsaría al admin). Se exige además que la nube haya
+       devuelto otros usuarios para confiar en el chequeo. */
+    if (dbRef.current.config.rlsEstricto && db.usuarios.length === 0) return;
     const actual = db.usuarios.find((u) => u.id === sesion.id);
     if (db.usuarios.length > 0 && (!actual || !actual.activo)) {
       setSesion(null);
@@ -836,7 +914,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     db, route, param, setParam, setRoute,
     tasa, tasaLoading, refreshTasa,
     ocrOpen, setOcrOpen, ocrDraft, setOcrDraft,
-    user, can, setCurrentUser, sesion, login, logout, cambiarMiPass, resetPassAdmin, solicitarRecuperacion, restablecerPass, setRolPermisos, setRolActivo,
+    user, can, setCurrentUser, sesion, login, logout, loginBoot, cambiarMiPass, resetPassAdmin, solicitarRecuperacion, restablecerPass, setRolPermisos, setRolActivo,
     confirm, confirmState, resolveConfirm, success, successState, closeSuccess, toast, toasts,
     saveEscuela, deleteEscuela, saveDocente, deleteDocente,
     saveEstudiante, deleteEstudiante, addPago, deletePago, setPedidoEstado, saveCodigos,
