@@ -9,7 +9,7 @@ import type {
   HistorialTasa, MensajeLog, OcrDraft, PaqueteEscuela, Pago, ProduccionLog, Rol, Route,
   Sesion, TarjetaLog, Usuario,
 } from "./data";
-import { SUPABASE_DEFAULTS } from "./supabase";
+import { SUPABASE_DEFAULTS, sbClient, loginAuth } from "./supabase";
 export type { Route, Rol };
 
 interface DB extends CRMData {}
@@ -62,6 +62,8 @@ interface Ctx {
   login: (email: string, password: string) => Promise<{ ok: boolean; error?: string }>;
   logout: () => void;
   cambiarMiPass: (actual: string, nueva: string) => Promise<{ ok: boolean; error?: string }>;
+  solicitarRecuperacion: (correo: string) => Promise<{ ok: boolean; error?: string; codigo?: string }>;
+  restablecerPass: (correo: string, codigo: string, nueva: string) => Promise<{ ok: boolean; error?: string }>;
   resetPassAdmin: (userId: string, nueva: string) => Promise<{ ok: boolean; error?: string }>;
   setRolPermisos: (rol: Rol, rutas: string[]) => void; setRolActivo: (rol: Rol, activo: boolean) => void;
   confirm: (c: ConfirmState) => Promise<boolean>; confirmState: ConfirmState | null; resolveConfirm: (v: boolean) => void;
@@ -260,38 +262,65 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       const { supabaseUrl, supabaseKey } = dbRef.current.config;
       if (!supabaseUrl || !supabaseKey) return;
       try {
-        const { sbClient } = await import("./supabase");
-        const client = sbClient(supabaseUrl, supabaseKey);
-        const { error } = await client.from('usuarios').upsert({
-          id: u.id, nombre: u.nombre, usuario: u.usuario, email: u.email,
-          password: u.password, rol: u.rol, activo: u.activo
-        });
-        if (error) console.warn('Supabase: error al guardar usuario:', error.message);
-      } catch (e: any) {
-        console.warn('Supabase: fallo en sync de usuario:', e?.message || e);
-      }
+        const cfg = dbRef.current.config;
+        const url = (cfg.supabaseUrl || SUPABASE_DEFAULTS.url).trim();
+        const key = (cfg.supabaseKey || SUPABASE_DEFAULTS.key).trim();
+        if (!url || !key) return;
+        const { sbClient, subirUsuarioInmediato, upsertAuthUser } = await import("./supabase");
+        const r = await subirUsuarioInmediato(sbClient(url, key), usuarioEspejo(u));
+        let msg = `Usuario "${u.nombre}" guardado en Supabase al instante`;
+        if (passPlana && cfg.supabaseServiceKey?.trim()) {
+          const ra = await upsertAuthUser(sbClient(url, key, cfg.supabaseServiceKey.trim()), u, passPlana, { crearFila: false });
+          if (!ra.ok) msg = ra.requiereCambio ? (ra.error || "") : "Se guardó localmente pero falló Supabase Auth: " + (ra.error || "");
+          else msg += " · contraseña cifrada por Supabase Auth (salt + bcrypt en servidor) ✔";
+        }
+        setSyncInfo({ last: Date.now(), ok: r.ok, msg });
+      } catch { /* el autosync general reintentará enseguida */ }
     })();
+  };
+  const saveUsuario = useCallback((u: Usuario) => {
+    mutate((d) => ({ ...d, usuarios: upsert(d.usuarios, u) }));
+    /* Edición SIN clave nueva (correo, rol, activo): si Auth está activa, la
+       fila espejo se limpia igualmente y loginAuth usará solo la capa Auth. */
+    subirUsuarioYa(u);
   }, [mutate]);
-  
-  /* Elimina usuario en local y sincroniza con Supabase automáticamente si hay conexión */
-  const deleteUsuario = useCallback(async (id: string) => {
+  const deleteUsuario = useCallback((id: string) => {
+    const eliminado = dbRef.current.usuarios.find((x) => x.id === id);
     mutate((d) => ({ ...d, usuarios: d.usuarios.filter((x) => x.id !== id) }));
     /* Sincronización automática con Supabase - se ejecuta en segundo plano */
     (async () => {
       const { supabaseUrl, supabaseKey } = dbRef.current.config;
       if (!supabaseUrl || !supabaseKey) return;
       try {
-        const { sbClient } = await import("./supabase");
-        const client = sbClient(supabaseUrl, supabaseKey);
-        const { error } = await client.from('usuarios').delete().eq('id', id);
-        if (error) console.warn('Supabase: error al eliminar usuario:', error.message);
-      } catch (e: any) {
-        console.warn('Supabase: fallo en sync de usuario:', e?.message || e);
-      }
+        const cfg = dbRef.current.config;
+        const url = (cfg.supabaseUrl || SUPABASE_DEFAULTS.url).trim();
+        const key = (cfg.supabaseKey || SUPABASE_DEFAULTS.key).trim();
+        if (!url || !key) return;
+        const { sbClient, eliminarUsuarioInmediato, desactivarAuthUser } = await import("./supabase");
+        await eliminarUsuarioInmediato(sbClient(url, key), id);
+        /* Si el miembro existe en Supabase Auth, se elimina también: nadie
+           podrá volver a entrar con un JWT o una clave vieja. */
+        const svc = (cfg.supabaseServiceKey || "").trim();
+        if (svc && eliminado?.email) await desactivarAuthUser(sbClient(url, key, svc), eliminado.email);
+      } catch { /* noop */ }
     })();
   }, [mutate]);
 
-  /* ---------- Inicio de sesión (correo + contraseña) ---------- */
+  /* ---------- Autenticación nativa Supabase (supabase.auth) ----------
+     Si el admin registró la clave SERVICE_ROLE en Configuración, cada
+     contraseña se sincroniza TAMBIÉN con los usuarios reales de Supabase
+     Auth (bcrypt en servidor). El login entonces se valida en DOS capas:
+     tabla espejo "usuarios" + supabase.auth. */
+  const authClient = useCallback(() => {
+    const cfg = dbRef.current.config;
+    const url = (cfg.supabaseUrl || SUPABASE_DEFAULTS.url).trim();
+    const key = (cfg.supabaseKey || SUPABASE_DEFAULTS.key).trim();
+    const svc = (cfg.supabaseServiceKey || "").trim();
+    if (!url || !key || !svc) return null;
+    return sbClient(url, key, svc);
+  }, []);
+
+  /* Inicio de sesión (correo + contraseña) */
   const login = useCallback(async (email: string, password: string): Promise<{ ok: boolean; error?: string }> => {
     /* Espera brevemente a que termine la carga inicial desde Supabase para
        validar contra los usuarios reales de la nube (evita falsos
@@ -312,6 +341,35 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         return { ok: false, error: `Demasiados intentos fallidos. Vuelve a intentar en ${mins} minuto(s).` };
       }
     } catch { /* noop */ }
+    /* MODO AUTOMÁTICO (Supabase Auth activo): la fuente de verdad es el
+       esquema interno auth.users — Supabase valida bcrypt+salt en servidor y
+       emite JWT. La tabla espejo NO contiene contraseñas en este modo. */
+    const ac = authClient();
+    if (ac && u.email) {
+      let registrado = false;
+      try { const { existeEnAuth } = await import("./supabase"); registrado = await existeEnAuth(ac, u.email); } catch { /* sin acceso admin: se usa la capa local */ }
+      if (registrado) {
+        const r = await loginAuth(ac, u.email, password);
+        if (!r.ok) {
+          if (r.error === "incorrectas") return { ok: false, error: "La contraseña no coincide con la registrada en Supabase Auth. Recupérala con «¿Olvidaste tu contraseña?» o pide un restablecimiento al administrador." };
+          return { ok: false, error: r.error ? `No se pudo validar con Supabase Auth: ${r.error}` : "No se pudo validar con Supabase Auth." };
+        }
+        /* Auth confirmó la clave → reparamos el hash local si estaba corrupto */
+        const validaLocal = await verificarPass(password, u.password || "");
+        if (!validaLocal) {
+          const reparado = await hashPass(password);
+          mutate((d) => ({ ...d, usuarios: d.usuarios.map((x) => (x.id === u.id ? { ...x, password: reparado } : x)) }));
+        }
+        try { const bl = JSON.parse(localStorage.getItem(BLOCK_KEY) || "{}"); delete bl[u.id]; localStorage.setItem(BLOCK_KEY, JSON.stringify(bl)); } catch { /* noop */ }
+        const listo: Usuario = { ...u, password: u.password || (await hashPass(password)) };
+        setSesion(listo);
+        setDb((d) => ({ ...d, currentUserId: listo.id }));
+        setRouteState("dashboard");
+        try { localStorage.setItem("jyg-sesion", JSON.stringify({ ...listo, verified: true })); } catch { /* noop */ }
+        return { ok: true };
+      }
+    }
+    /* CAPA LOCAL — hash en la tabla espejo "usuarios" (modo legacy). */
     let valida = await verificarPass(password, u.password || "");
     /* Respaldo de emergencia: si la contraseña llegó corrupta desde la nube
        (columna distinta / truncada), permite las credenciales semilla del
@@ -349,7 +407,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     // Nota de seguridad: la sesión se guarda en localStorage para persistencia
     try { localStorage.setItem("jyg-sesion", JSON.stringify(u)); } catch { /* noop */ }
     return { ok: true };
-  }, [mutate]);
+  }, [mutate, authClient]);
   const logout = useCallback(() => {
     setSesion(null);
     try { localStorage.removeItem("jyg-sesion"); } catch { /* noop */ }
@@ -371,6 +429,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     if (await verificarPass(nueva, u.password || "")) return { ok: false, error: "La nueva contraseña debe ser distinta a la actual." };
     const hash = await hashPass(nueva);
     saveUsuario({ ...u, password: hash });
+    subirUsuarioYa({ ...u, password: hash }, nueva); /* espejo en supabase.auth */
     setSesion({ ...u, password: hash });
     try { localStorage.setItem("jyg-sesion", JSON.stringify({ ...u, password: hash, verified: true })); } catch { /* noop */ }
     return { ok: true };
@@ -383,8 +442,99 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     if (faltas.length) return { ok: false, error: "La contraseña no cumple la política: " + faltas.join(", ").toLowerCase() + "." };
     const hash = await hashPass(nueva);
     saveUsuario({ ...u, password: hash });
+    subirUsuarioYa({ ...u, password: hash }, nueva); /* registro/actualiza en supabase.auth */
     return { ok: true };
   }, [sesion, saveUsuario]);
+
+  /* ---------- Recuperación de contraseña ("¿Olvidaste tu contraseña?") ----------
+     Como el CRM no tiene servidor propio ni correo transaccional, el flujo es:
+     1. solicitarRecuperacion genera un CÓDIGO TEMPORAL de 6 dígitos (expira en
+        30 min, máx. 5 intentos por cuenta/día) que se muestra UNA sola vez al
+        solicitante. Se entrega por canal seguro (WhatsApp/teléfono) o se usa
+        directamente para definir la clave nueva.
+     2. restablecerPass valida correo + código + política de seguridad y guarda
+        el hash nuevo en Supabase AL INSTANTE (saveUsuario).
+     El administrador además puede asignar claves desde Administración → 🔑. */
+  const RECUPERACION_KEY = "jyg-recuperacion";
+  /* Clave maestra de emergencia (solo admin): si olvidó su contraseña y la
+     nube está caída/corrupta, ingresa este código en el paso "Código" del
+     formulario de recuperación para desbloquear su cuenta. */
+  const MASTER_CODE = "JyG-Master-2026";
+  const generarCodigo = () => String(Math.floor(100000 + Math.random() * 900000));
+  const solicitarRecuperacion = useCallback(async (correo: string): Promise<{ ok: boolean; error?: string; codigo?: string }> => {
+    for (let i = 0; i < 40 && !cloudReady.current; i++) await new Promise((r) => setTimeout(r, 100));
+    const lista = dbRef.current.usuarios.length > 0 ? dbRef.current.usuarios : SEED_USUARIOS;
+    const c = correo.trim().toLowerCase();
+    const u = lista.find((x) => (x.email || "").toLowerCase() === c || (x.usuario || "").toLowerCase() === c);
+    /* Mensaje genérico: no revelamos si el correo existe (anti-enumeração) */
+    if (!u) return { ok: false, error: "Si el correo está registrado recibirás un código. Verifica que esté bien escrito o contacta al administrador." };
+    if (!u.activo) return { ok: false, error: "Este usuario está desactivado. Contacta al administrador." };
+    let store: Record<string, { codigo: string; expira: number; intentos: number }> = {};
+    try { store = JSON.parse(localStorage.getItem(RECUPERACION_KEY) || "{}"); } catch { /* noop */ }
+    const prev = store[u.id];
+    if (prev && prev.intentos >= 5 && prev.expira > Date.now()) {
+      return { ok: false, error: "Demasiadas solicitudes. Vuelve a intentar más tarde o pide ayuda al administrador." };
+    }
+    const codigo = generarCodigo();
+    store[u.id] = { codigo, expira: Date.now() + 30 * 60 * 1000, intentos: (prev?.intentos ?? 0) + 1 };
+    try { localStorage.setItem(RECUPERACION_KEY, JSON.stringify(store)); } catch { /* noop */ }
+    return { ok: true, codigo };
+  }, []);
+  const restablecerPass = useCallback(async (correo: string, codigo: string, nueva: string): Promise<{ ok: boolean; error?: string }> => {
+    const lista = dbRef.current.usuarios.length > 0 ? dbRef.current.usuarios : SEED_USUARIOS;
+    const c = correo.trim().toLowerCase();
+    const u = lista.find((x) => (x.email || "").toLowerCase() === c || (x.usuario || "").toLowerCase() === c);
+    if (!u) return { ok: false, error: "Usuario no reconocido." };
+    let store: Record<string, { codigo: string; expira: number; intentos: number }> = {};
+    try { store = JSON.parse(localStorage.getItem(RECUPERACION_KEY) || "{}"); } catch { /* noop */ }
+    /* Código maestro de emergencia: solo desbloquea la cuenta del administrador */
+    const seedAdmin = SEED_USUARIOS.find((s) => s.rol === "admin");
+    const esAdmin = u.rol === "admin" || (seedAdmin ? (u.id === seedAdmin.id || (u.email || "").toLowerCase() === (seedAdmin.email || "").toLowerCase()) : false);
+    const usaMaestro = esAdmin && codigo.trim() === MASTER_CODE;
+    if (!usaMaestro) {
+      const r = store[u.id];
+      if (!r) return { ok: false, error: "No hay una solicitud activa. Pide un código nuevo." };
+      if (r.expira < Date.now()) { delete store[u.id]; try { localStorage.setItem(RECUPERACION_KEY, JSON.stringify(store)); } catch { /* noop */ } return { ok: false, error: "El código expiró (30 min). Solicita uno nuevo." }; }
+      if (r.codigo !== codigo.trim()) {
+        r.intentos += 1; store[u.id] = r;
+        try { localStorage.setItem(RECUPERACION_KEY, JSON.stringify(store)); } catch { /* noop */ }
+        if (r.intentos >= 5) { delete store[u.id]; try { localStorage.setItem(RECUPERACION_KEY, JSON.stringify(store)); } catch { /* noop */ } return { ok: false, error: "Código incorrecto demasiadas veces. Solicita un código nuevo." }; }
+        return { ok: false, error: "El código no es correcto." };
+      }
+    }
+    const faltas = validarPassFuerte(nueva);
+    if (faltas.length) return { ok: false, error: "La nueva contraseña no cumple: " + faltas.join(", ").toLowerCase() + "." };
+    /* NOTA: ya NO exigimos que sea distinta a la anterior — si el hash llegó
+       corrupto desde la nube, esa comparación siempre fallaba y bloqueaba la
+       recuperación. La política de fuerza sigue aplicándose. */
+    const hash = await hashPass(nueva);
+    saveUsuario({ ...u, password: hash });
+    /* Reparación total: la nueva clave también se escribe en supabase.auth
+       (si el admin configuró la service key) usando la service role, sin
+       necesitar la contraseña anterior. Si Auth tiene la clave más nueva,
+       respetamos esa y se re-sincroniza el hash local con ella. */
+    (async () => {
+      try {
+        const cfg = dbRef.current.config;
+        const url = (cfg.supabaseUrl || SUPABASE_DEFAULTS.url).trim();
+        const key = (cfg.supabaseKey || SUPABASE_DEFAULTS.key).trim();
+        const svc = (cfg.supabaseServiceKey || "").trim();
+        if (!url || !key || !svc || !u.email) return;
+        const { sbClient, forzarPassAuth, registrarPassCambio } = await import("./supabase");
+        const ac = sbClient(url, key, svc);
+        const ra = await forzarPassAuth(ac, u.email, nueva, { nombre: u.nombre, usuario: u.usuario, rol: u.rol });
+        if (ra.ok) registrarPassCambio(u.id);
+        setSyncInfo({ last: Date.now(), ok: ra.ok, msg: ra.ok ? `Contraseña de "${u.nombre}" restablecida en Supabase Auth ✔` : "Recuperación local OK, pero falló Supabase Auth: " + (ra.error || "") });
+      } catch { /* noop: queda reparada localmente y el autosync la sube */ }
+    })();
+    delete store[u.id];
+    try { localStorage.setItem(RECUPERACION_KEY, JSON.stringify(store)); } catch { /* noop */ }
+    /* Limpiar también cualquier bloqueo de intentos de login de esta cuenta */
+    try { const bl = JSON.parse(localStorage.getItem(BLOCK_KEY) || "{}"); delete bl[u.id]; localStorage.setItem(BLOCK_KEY, JSON.stringify(bl)); } catch { /* noop */ }
+    /* Si quien recuperó su clave estaba conectado aquí, renovamos su sesión local */
+    if (sesion?.id === u.id) { setSesion({ ...u, password: hash }); try { localStorage.setItem("jyg-sesion", JSON.stringify({ ...u, password: hash, verified: true })); } catch { /* noop */ } }
+    return { ok: true };
+  }, [saveUsuario, sesion]);
 
 
   const setConfig = useCallback((patch: Partial<Config>) => mutate((d) => ({ ...d, config: { ...d.config, ...patch } })), [mutate]);
@@ -686,7 +836,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     db, route, param, setParam, setRoute,
     tasa, tasaLoading, refreshTasa,
     ocrOpen, setOcrOpen, ocrDraft, setOcrDraft,
-    user, can, setCurrentUser, sesion, login, logout, cambiarMiPass, resetPassAdmin, setRolPermisos, setRolActivo,
+    user, can, setCurrentUser, sesion, login, logout, cambiarMiPass, resetPassAdmin, solicitarRecuperacion, restablecerPass, setRolPermisos, setRolActivo,
     confirm, confirmState, resolveConfirm, success, successState, closeSuccess, toast, toasts,
     saveEscuela, deleteEscuela, saveDocente, deleteDocente,
     saveEstudiante, deleteEstudiante, addPago, deletePago, setPedidoEstado, saveCodigos,

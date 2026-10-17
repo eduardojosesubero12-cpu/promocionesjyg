@@ -1,15 +1,15 @@
 import React, { useMemo, useRef, useState } from "react";
 import {
   AlertTriangle, BarChart3, Boxes, Check, Copy, Download, Eye, EyeOff, GraduationCap, History, KeyRound,
-  Package, Pencil, Plug, Plus, Save, ScanLine, ShieldCheck, Sparkles, Trash2, Upload, UserCog, Users, Wallet, X,
+  Package, Pencil, Plug, Plus, RefreshCw, Save, ScanLine, ShieldCheck, Sparkles, Trash2, Upload, UserCog, Users, Wallet, X,
 } from "lucide-react";
 import { useApp } from "../lib/store";
 import type { CatAdicional, PaqueteEscuela, Rol, Usuario } from "../lib/data";
 import {
   ACCESOS_DEFAULT, API_DOLARES, API_EUROS, DB_TABLES, MODULOS_GRUPOS, OPENROUTER_MODELOS, ORDEN_MATERIALES,
-  PAQUETES, ROL_DESC, ROL_LABEL, ROLES_INFO, SUPABASE_SCHEMA_SEGURO, TODOS_MODULOS,
+  PAQUETES, ROL_DESC, ROL_LABEL, ROLES_INFO, SEED_USUARIOS, SUPABASE_SCHEMA_SEGURO, TODOS_MODULOS,
   computeProduccion, downloadFile, estudianteTotales, fmtBs, fmtFecha, fmtFechaHoraViva, fmtHaceSegundos,
-  fmtUSD, getAdicionales, getGrados, getSecciones, getTallas, hashPass, toCSV, todayISO, uid, validarPassFuerte,
+  fmtUSD, getAdicionales, getGrados, getSecciones, getTallas, hashPass, toCSV, todayISO, uid, validarPassFuerte, verificarPass,
 } from "../lib/data";
 import {
   Badge, Bar, EmptyState, Field, FilterSelect, FormFoot, FormSec, Modal, SearchInput, SectionHead,
@@ -887,7 +887,9 @@ export function Integraciones() {
   const { db, setConfig, confirm, success, toast, testCloud, syncToCloud, restoreFromCloud, syncInfo, syncing, rtEstado, cloudStatus, testCloudNow, deleteTasaHistorial, clearTasaHistorial } = useApp();
   const [sbUrl, setSbUrl] = useState(db.config.supabaseUrl);
   const [sbKey, setSbKey] = useState(db.config.supabaseKey);
+  const [sbSvc, setSbSvc] = useState(db.config.supabaseServiceKey || "");
   const [verKey, setVerKey] = useState(false);
+  const [verSvc, setVerSvc] = useState(false);
   const [test, setTest] = useState<"idle" | "busy" | "ok" | "fail">("idle");
   const [testInfo, setTestInfo] = useState<{ tablas: number; filas: number } | null>(null);
   const [verSql, setVerSql] = useState(false);
@@ -898,10 +900,43 @@ export function Integraciones() {
   const histRef = useRef<HTMLInputElement>(null);
 
   const guardarSb = async () => {
-    const ok = await confirm({ title: "¿Desea guardar este registro?", message: "Las credenciales de Supabase se guardarán en este navegador.", confirmText: "Sí, Guardar" });
+    const ok = await confirm({ title: "¿Desea guardar este registro?", message: "Las credenciales de Supabase se guardarán en este navegador." + (sbSvc.trim() ? " La service role key permite gestionar usuarios reales en Supabase Auth: trátala como un secreto." : ""), confirmText: "Sí, Guardar" });
     if (!ok) return;
-    setConfig({ supabaseUrl: sbUrl.trim(), supabaseKey: sbKey.trim(), autoSyncCloud: autoSync });
+    setConfig({ supabaseUrl: sbUrl.trim(), supabaseKey: sbKey.trim(), autoSyncCloud: autoSync, supabaseServiceKey: sbSvc.trim() });
     success("Credenciales de Supabase guardadas");
+    /* MODO AUTOMÁTICO: al activar la autenticación nativa, TODAS las claves
+       actuales del equipo viajan en texto plano por HTTPS hacia Supabase;
+       el servidor aplica salt + bcrypt y aísla el hash en auth.users.
+       Luego la tabla espejo "usuarios" queda SIN secretos en la nube. */
+    if (sbSvc.trim()) void sincronizarAuthAhora(true);
+  };
+  /* Sincronización masiva local → Supabase Auth (crea/actualiza usuarios
+     reales y limpia los secretos del espejo). Reutilizable desde cualquier
+     botón; devuelve un resumen para mostrarlo en pantalla. */
+  const sincronizarAuthAhora = async (limpiar = true): Promise<string> => {
+    try {
+      const { sbClient, sincronizarAuthMasivo } = await import("../lib/supabase");
+      const ac = sbClient(sbUrl.trim(), sbKey.trim(), sbSvc.trim());
+      const r = await sincronizarAuthMasivo(ac, db.usuarios, { limpiarEspejo: limpiar });
+      const partes = [`✚ ${r.creados} creados`, `↻ ${r.actualizados} actualizados`];
+      if (r.omitidos) partes.push(`⤳ ${r.omitidos} omitidos (sin correo)`);
+      if (r.errores.length) partes.push(`⚠ ${r.errores.length} error(es): ${r.errores.slice(0, 3).join(" · ")}`);
+      const msg = `Supabase Auth automático: ${partes.join(" · ")}`;
+      toast(msg, r.errores.length ? "warn" : "ok");
+      if (r.creados + r.actualizados > 0 && limpiar) void syncToCloud(); /* publica el espejo sin secretos */
+      return msg;
+    } catch (e: any) {
+      const msg = "No se pudo sincronizar con Supabase Auth: " + (e?.message || "desconocido");
+      toast(msg, "err");
+      return msg;
+    }
+  };
+  const [syncAuthBusy, setSyncAuthBusy] = useState(false);
+  const [syncAuthResumen, setSyncAuthResumen] = useState("");
+  const ejecutarSyncAuth = async () => {
+    setSyncAuthBusy(true);
+    setSyncAuthResumen(await sincronizarAuthAhora(true));
+    setSyncAuthBusy(false);
   };
   const probar = async () => {
     setTest("busy");
@@ -1000,6 +1035,30 @@ export function Integraciones() {
                 </div>
               </Field>
             </div>
+            <div className="mt-3">
+              <Field label="Service role key (opcional · autenticación nativa)">
+                <div className="d-flex gap-1">
+                  <input type={verSvc ? "text" : "password"} className="input" style={{ fontFamily: "ui-monospace, monospace", fontSize: 12 }} placeholder="eyJhbGciOiJIUzI1NiIs… (o sb_secret_…)" value={sbSvc} onChange={(e) => setSbSvc(e.target.value)} />
+                  <button className="icon-btn" title={verSvc ? "Ocultar" : "Mostrar"} onClick={() => setVerSvc(!verSvc)}>{verSvc ? <EyeOff size={15} /> : <Eye size={15} />}</button>
+                </div>
+              </Field>
+              <p className="mt-1 mb-0" style={{ fontSize: 11.5, color: "var(--ink-soft)" }}>
+                {sbSvc.trim()
+                  ? <><ShieldCheck size={12} style={{ verticalAlign: -2, color: "var(--ok)" }} /> Modo Automático ACTIVO: el CRM solo envía la contraseña en texto plano por HTTPS; Supabase la intercepta, le aplica <b>salt + bcrypt</b> y almacena el hash aislado en su esquema interno <code>auth.users</code>. Los miembros aparecen en Dashboard → Authentication → Users y la tabla espejo queda <b>sin secretos</b>.</>
+                  : <>Sin esta clave el CRM usa el esquema local (tabla usuarios). Para activarlo: Supabase → Project Settings → API → <b>service_role</b> (secret). Es la única credencial que puede crear/eliminar usuarios de Auth — guárdala solo aquí, nunca la compartas ni la subas a GitHub.</>}
+              </p>
+            </div>
+            {sbSvc.trim() && (
+              <div className="mt-3 p-2 rounded" style={{ background: "rgba(16,185,129,.07)", border: "1px solid rgba(16,185,129,.25)" }}>
+                <div className="d-flex gap-2 align-items-center flex-wrap">
+                  <button className="btn btn-sm btn-primary" onClick={() => void ejecutarSyncAuth()} disabled={syncAuthBusy}>
+                    <RefreshCw size={14} className={syncAuthBusy ? "spin" : ""} /> {syncAuthBusy ? "Sincronizando…" : "Sincronizar equipo con Supabase Auth ahora"}
+                  </button>
+                  <span style={{ fontSize: 11.5, color: "var(--ink-soft)" }}>Crea/actualiza los usuarios reales y limpia los hashes del espejo público.</span>
+                </div>
+                {syncAuthResumen && <p className="mt-2 mb-0" style={{ fontSize: 11.5, fontFamily: "ui-monospace, monospace", color: "var(--ink)" }}>{syncAuthResumen}</p>}
+              </div>
+            )}
             <div className="d-flex gap-2 flex-wrap mt-3 align-items-center">
               <button className="btn btn-primary btn-sm" onClick={() => void guardarSb()}><Save size={14} /> Guardar credenciales</button>
               <button className="btn btn-ghost btn-sm" onClick={() => void probar()} disabled={test === "busy"}>

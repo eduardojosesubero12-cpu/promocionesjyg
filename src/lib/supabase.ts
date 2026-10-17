@@ -7,8 +7,8 @@ import { DB_TABLES } from "./data";
 const ENV_URL = (import.meta as any).env?.VITE_SUPABASE_URL || "https://kdzofrxquzhtixzjtgmx.supabase.co";
 const ENV_KEY = (import.meta as any).env?.VITE_SUPABASE_ANON_KEY || "sb_publishable_ibQlrVHQi9oqKd5iw3X3CA_fpSMjzFq";
 export const SUPABASE_DEFAULTS = { url: ENV_URL, key: ENV_KEY };
-export const sbClient = (url?: string, key?: string): SupabaseClient =>
-  createClient(url?.trim() || ENV_URL, key?.trim() || ENV_KEY, { auth: { persistSession: false, autoRefreshToken: false } });
+export const sbClient = (url?: string, key?: string, serviceKey?: string): SupabaseClient =>
+  createClient(url?.trim() || ENV_URL, (serviceKey?.trim() || key)?.trim() || ENV_KEY, { auth: { persistSession: false, autoRefreshToken: false } });
 
 const codV = () => ({ carnetAlumno: "", carnetRep: "", firmaLibro: "", togaBirrete: "", fotoLibre: "", fotoAdicional: "" });
 
@@ -59,6 +59,11 @@ export async function dbToRows(client: SupabaseClient | null, db: CRMData): Prom
   const hayApellido = client ? await existeColumna(client, "estudiantes", "apellido") : false;
   const hashCol = client ? (await existeColumna(client, "usuarios", "password_hash") ? "password_hash" : "password") : "password";
   const usuarioCol = client ? await existeColumna(client, "usuarios", "usuario") : true;
+  /* MODO AUTOMÁTICO: si el proyecto tiene Supabase Auth activo (service key),
+     la contraseña vive SOLO en auth.users con salt+bcrypt gestionados por
+     Supabase. La tabla espejo viaja SIN secreto — así ningún hash propio se
+     expone vía PostgREST y no puede corromperse al sincronizar. */
+  const authActiva = !!(db.config?.supabaseServiceKey || "").trim();
   return {
     escuelas: db.escuelas.map((e) => ({ id: e.id, nombre: e.nombre || "", director: e.director, telefono: e.telefono, direccion: e.direccion, estado: e.estado, municipio: e.municipio, anio_escolar: e.anioEscolar, observaciones: e.observaciones })),
     docentes: db.docentes.map((d) => ({ id: d.id, nombre: d.nombre || "", telefono: d.telefono, escuela_id: d.escuelaId || null, correo: d.correo, observaciones: d.observaciones })),
@@ -75,7 +80,7 @@ export async function dbToRows(client: SupabaseClient | null, db: CRMData): Prom
     sesiones: db.sesiones.map((s) => ({ id: s.id, escuela_id: s.escuelaId || null, fecha: s.fecha, hora: s.hora, fotografo: s.fotografo, estado: s.estado, fotos: s.fotos, nota: s.nota })),
     eventos: db.eventos.map((e) => ({ id: e.id, fecha: e.fecha, hora: e.hora, titulo: e.titulo, tipo: e.tipo, escuela_id: e.escuelaId || null })),
     mensajes: db.mensajes.map((m) => ({ id: m.id, fecha: m.fecha, destinatario: m.destinatario, telefono: m.telefono, plantilla: m.plantilla, texto: m.texto })),
-    usuarios: db.usuarios.map((u) => { const r: any = { id: u.id, nombre: u.nombre, email: u.email || "", rol: u.rol, activo: u.activo, [hashCol]: cifrarPass(u.password || "") }; if (usuarioCol) r.usuario = u.usuario; return r; }),
+    usuarios: db.usuarios.map((u) => { const r: any = { id: u.id, nombre: u.nombre, email: u.email || "", rol: u.rol, activo: u.activo, [hashCol]: authActiva ? "" : cifrarPass(u.password || "") }; if (usuarioCol) r.usuario = u.usuario; return r; }),
     historial_tasas: db.historialTasas.map((h) => ({ id: h.id, fecha: h.fecha, usd: h.usd, euro: h.euro, paralelo: h.paralelo, fuente: h.fuente, actualizado: h.actualizado })),
     paquetes_escuelas: db.paquetesEscuelas.map((p) => ({ id: p.id, escuela_id: p.escuelaId, nombre: p.nombre, tipo_paquete_id: p.tipoPaqueteId, precio: p.precio, articulos: p.articulos, nota: p.nota, activo: p.activo, creado: p.creado })),
     facturas: (db.facturas || []).map((f) => ({ id: f.id, numero: f.numero, estudiante_id: f.estudianteId, estudiante: f.estudiante, fecha: f.fecha, total: f.total, accion: f.accion })),
@@ -303,6 +308,207 @@ export async function subirUsuarioInmediato(client: SupabaseClient, u: Usuario):
 export async function eliminarUsuarioInmediato(client: SupabaseClient, id: string): Promise<{ ok: boolean; error?: string }> {
   const r = await client.from("usuarios").delete().eq("id", id);
   return { ok: !r.error, error: r.error?.message };
+}
+
+/* ============================================================
+   AUTENTICACIÓN NATIVA SUPABASE (supabase.auth)
+   Cada miembro del equipo JyG queda registrado como usuario real
+   de Supabase Auth: la validación de credenciales ocurre en el
+   servidor con bcrypt y el login emite un JWT propio.
+   La tabla pública "usuarios" sigue existiendo como espejo para
+   roles/estado — pero NUNCA contiene contraseñas (se envía "" a
+   password_hash, que solo guarda el cifrado local legacy).
+   ============================================================ */
+const PASS_META_KEY = "jyg-pass-meta"; /* { [userId]: { updatedAt: epochMs } } */
+export function metaPass(userId: string): { updatedAt: number } | null {
+  try {
+    const all = JSON.parse(localStorage.getItem(PASS_META_KEY) || "{}");
+    return all[userId] || null;
+  } catch { return null; }
+}
+export function registrarPassCambio(userId: string) {
+  try {
+    const all = JSON.parse(localStorage.getItem(PASS_META_KEY) || "{}");
+    all[userId] = { updatedAt: Date.now() };
+    localStorage.setItem(PASS_META_KEY, JSON.stringify(all));
+  } catch { /* noop */ }
+}
+
+export type ResultadoAuth = { ok: boolean; error?: string; requiereCambio?: boolean };
+
+/* Crear / actualizar al usuario en Supabase Auth.
+   - Si no existe aún: signUp con la contraseña dada (queda verificado por
+     el admin, sin correo) y se escribe además la fila espejo en "usuarios".
+   - Si ya existe: compara la marca de tiempo de la última clave conocida
+     contra updated_at de auth.users; si la nube es MÁS nueva, el cambio
+     ocurrió en otro dispositivo → devuelve requiereCambio (sin pisar). */
+export async function upsertAuthUser(
+  client: SupabaseClient,
+  u: Usuario,
+  passPlana: string,
+  opts: { crearFila?: boolean } = {},
+): Promise<ResultadoAuth> {
+  const email = (u.email || "").trim();
+  if (!email) return { ok: false, error: "El usuario debe tener un correo válido." };
+  let existente: any = null;
+  try {
+    const { data: lista } = await client.auth.admin.listUsers({ page: 1, perPage: 1000 });
+    existente = (lista?.users || []).find((x: any) => (x.email || "").toLowerCase() === email.toLowerCase()) || null;
+  } catch (e: any) {
+    return { ok: false, error: `No hay acceso a supabase.auth (service role): ${e?.message || e}` };
+  }
+  if (!existente) {
+    const { data, error } = await client.auth.admin.createUser({
+      email,
+      password: passPlana,
+      email_confirm: true,
+      user_metadata: { nombre: u.nombre, usuario: u.usuario, rol: u.rol },
+    });
+    if (error) return { ok: false, error: error.message };
+    if (opts.crearFila) {
+      /* Espejo en la tabla pública SIN contraseña (la clave vive en Auth) */
+      const hashCol = await existeColumna(client, "usuarios", "password_hash") ? "password_hash" : "password";
+      const usuarioCol = await existeColumna(client, "usuarios", "usuario");
+      let fila: any = { id: u.id, nombre: u.nombre, email: u.email, rol: u.rol, activo: u.activo, [hashCol]: "" };
+      if (usuarioCol) fila.usuario = u.usuario || "";
+      const invalidas = await columnasNoValidas(client, "usuarios");
+      if (invalidas) fila = Object.fromEntries(Object.entries(fila).filter(([k]) => !invalidas.includes(k)));
+      await client.from("usuarios").upsert([fila], { onConflict: "id" });
+    }
+    registrarPassCambio(u.id);
+    return { ok: true };
+  }
+  /* ¿Alguien cambió la clave en OTRO dispositivo más recientemente? */
+  const meta = metaPass(u.id);
+  const cloudMs = existente.updated_at ? new Date(existente.updated_at).getTime() : 0;
+  if (meta && cloudMs && cloudMs > meta.updatedAt + 2000) {
+    return { ok: false, requiereCambio: true, error: "La contraseña fue cambiada recientemente desde otro dispositivo. Vuelve a sincronizar los datos antes de asignar una nueva clave." };
+  }
+  const { error } = await client.auth.admin.updateUserById(existente.id, { password: passPlana });
+  if (error) return { ok: false, error: error.message };
+  registrarPassCambio(u.id);
+  return { ok: true };
+}
+
+/* Login real contra Supabase Auth (bcrypt en servidor + JWT). */
+export async function loginAuth(client: SupabaseClient, email: string, password: string): Promise<ResultadoAuth> {
+  try {
+    const { error } = await client.auth.signInWithPassword({ email, password });
+    if (error) {
+      const msg = (error.message || "").toLowerCase();
+      if (/invalid login credentials|email or password/.test(msg)) return { ok: false, error: "incorrectas" };
+      if (/rate limit/.test(msg)) return { ok: false, error: "demasiados intentos, espera unos minutos" };
+      return { ok: false, error: error.message };
+    }
+    await client.auth.signOut(); /* solo queríamos verificar; sesión local gestionada por el CRM */
+    return { ok: true };
+  } catch (e: any) {
+    return { ok: false, error: e?.message || "fallo de red" };
+  }
+}
+
+/* Desactivar/eliminar también en Auth para que nadie entre con un JWT viejo. */
+export async function desactivarAuthUser(client: SupabaseClient, email: string): Promise<void> {
+  try {
+    const { data: lista } = await client.auth.admin.listUsers({ page: 1, perPage: 1000 });
+    const x = (lista?.users || []).find((u: any) => (u.email || "").toLowerCase() === (email || "").toLowerCase());
+    if (x) await client.auth.admin.deleteUser(x.id);
+  } catch { /* noop: la fila espejo + RLS siguen bloqueando el acceso */ }
+}
+
+/* ¿Existe este correo como usuario real de Supabase Auth? */
+export async function existeEnAuth(client: SupabaseClient, email: string): Promise<boolean> {
+  try {
+    const { data: lista } = await client.auth.admin.listUsers({ page: 1, perPage: 1000 });
+    return (lista?.users || []).some((u: any) => (u.email || "").toLowerCase() === (email || "").toLowerCase());
+  } catch { return false; }
+}
+
+/* ============================================================
+   SINCRONIZACIÓN MASIVA AUTOMÁTICA → Supabase Auth
+   El cliente SOLO envía la contraseña en texto plano por HTTPS;
+   Supabase la intercepta, aplica salt + bcrypt y guarda el hash
+   AISLADO en su esquema interno auth.users. Nunca se sube un hash
+   propio a la tabla pública "usuarios" cuando Auth está activo.
+   ============================================================ */
+export type SyncAuthResultado = { creados: number; actualizados: number; omitidos: number; errores: string[] };
+export async function sincronizarAuthMasivo(
+  client: SupabaseClient,
+  usuarios: Usuario[],
+  opts: { limpiarEspejo?: boolean } = {},
+): Promise<SyncAuthResultado> {
+  const res: SyncAuthResultado = { creados: 0, actualizados: 0, omitidos: 0, errores: [] };
+  let lista: any[] = [];
+  try {
+    const { data } = await client.auth.admin.listUsers({ page: 1, perPage: 1000 });
+    lista = data?.users || [];
+  } catch (e: any) {
+    return { ...res, errores: [`Sin acceso a supabase.auth (service role): ${e?.message || e}`] };
+  }
+  const hashCol = await existeColumna(client, "usuarios", "password_hash") ? "password_hash" : "password";
+  for (const u of usuarios) {
+    const email = (u.email || "").trim().toLowerCase();
+    if (!email) { res.omitidos++; continue; } /* sin correo no puede haber Auth real */
+    /* La contraseña local viaja descifrada solo por HTTPS hacia Auth */
+    const passPlana = descifrarPass(u.password || "");
+    if (!passPlana) { res.omitidos++; continue; }
+    const existente = lista.find((x: any) => (x.email || "").toLowerCase() === email);
+    try {
+      if (existente) {
+        const { error } = await client.auth.admin.updateUserById(existente.id, {
+          password: passPlana,
+          user_metadata: { nombre: u.nombre, usuario: u.usuario, rol: u.rol },
+        });
+        if (error) { res.errores.push(`${u.nombre}: ${error.message}`); continue; }
+        registrarPassCambio(u.id);
+        res.actualizados++;
+      } else {
+        const { error } = await client.auth.admin.createUser({
+          email, password: passPlana, email_confirm: true,
+          user_metadata: { nombre: u.nombre, usuario: u.usuario, rol: u.rol },
+        });
+        if (error) { res.errores.push(`${u.nombre}: ${error.message}`); continue; }
+        registrarPassCambio(u.id);
+        res.creados++;
+      }
+      /* Fuente de verdad = auth.users: la tabla espejo queda SIN secreto */
+      if (opts.limpiarEspejo) {
+        const invalidas = await columnasNoValidas(client, "usuarios");
+        const fila: any = { id: u.id, [hashCol]: "" };
+        const limpio = Object.fromEntries(Object.entries(fila).filter(([k]) => !invalidas.includes(k)));
+        await client.from("usuarios").update(limpio).eq("id", u.id);
+      }
+    } catch (e: any) {
+      res.errores.push(`${u.nombre}: ${e?.message || e}`);
+    }
+  }
+  return res;
+}
+
+/* Cambio directo de clave en supabase.auth sin conocer la anterior
+   (requiere service role — solo lo usa el flujo de recuperación).
+   Si el usuario no existe todavía en Auth, se crea con la nueva clave. */
+export async function forzarPassAuth(client: SupabaseClient, email: string, passPlana: string, meta?: { nombre?: string; usuario?: string; rol?: string }): Promise<ResultadoAuth> {
+  const correo = (email || "").trim();
+  if (!correo) return { ok: false, error: "Falta el correo del usuario." };
+  let existente: any = null;
+  try {
+    const { data: lista } = await client.auth.admin.listUsers({ page: 1, perPage: 1000 });
+    existente = (lista?.users || []).find((x: any) => (x.email || "").toLowerCase() === correo.toLowerCase()) || null;
+  } catch (e: any) {
+    return { ok: false, error: `Sin acceso a supabase.auth (service role): ${e?.message || e}` };
+  }
+  if (existente) {
+    const { error } = await client.auth.admin.updateUserById(existente.id, { password: passPlana });
+    if (error) return { ok: false, error: error.message };
+    return { ok: true };
+  }
+  const { error } = await client.auth.admin.createUser({
+    email: correo, password: passPlana, email_confirm: true,
+    user_metadata: { nombre: meta?.nombre, usuario: meta?.usuario, rol: meta?.rol },
+  });
+  if (error) return { ok: false, error: error.message };
+  return { ok: true };
 }
 
 export async function descargarTodo(client: SupabaseClient): Promise<Record<string, any[]>> {
