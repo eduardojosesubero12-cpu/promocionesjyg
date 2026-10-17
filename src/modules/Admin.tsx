@@ -9,7 +9,7 @@ import {
   ACCESOS_DEFAULT, API_DOLARES, API_EUROS, DB_TABLES, MODULOS_GRUPOS, OPENROUTER_MODELOS, ORDEN_MATERIALES,
   PAQUETES, ROL_DESC, ROL_LABEL, ROLES_INFO, SUPABASE_SCHEMA_SEGURO, TODOS_MODULOS,
   computeProduccion, downloadFile, estudianteTotales, fmtBs, fmtFecha, fmtFechaHoraViva, fmtHaceSegundos,
-  fmtUSD, getAdicionales, getGrados, getSecciones, getTallas, hashPass, toCSV, todayISO, uid,
+  fmtUSD, getAdicionales, getGrados, getSecciones, getTallas, hashPass, toCSV, todayISO, uid, validarPassFuerte,
 } from "../lib/data";
 import {
   Badge, Bar, EmptyState, Field, FilterSelect, FormFoot, FormSec, Modal, SearchInput, SectionHead,
@@ -203,13 +203,26 @@ export function Reportes() {
 const uVacio = (): Usuario => ({ id: "", nombre: "", usuario: "", email: "", password: "", rol: "operador", activo: true });
 
 export function Usuarios() {
-  const { db, user, saveUsuario, deleteUsuario, setCurrentUser, setRolPermisos, setRolActivo, confirm, success, toast } = useApp();
+  const { db, user, sesion, saveUsuario, deleteUsuario, setCurrentUser, setRolPermisos, setRolActivo, resetPassAdmin, confirm, success, toast } = useApp();
   const [rolSel, setRolSel] = useState<Rol>("admin");
   const [form, setForm] = useState<Usuario | null>(null);
   const [nuevaPass, setNuevaPass] = useState("");
   const [verPass, setVerPass] = useState(false);
   const [guardado, setGuardado] = useState(0);
   const [verMatriz, setVerMatriz] = useState(true);
+  /* Modal de restablecimiento de contraseña (solo admin) */
+  const [resetU, setResetU] = useState<Usuario | null>(null);
+  const [resetPass, setResetPass] = useState("");
+  const esAdmin = sesion?.rol === "admin";
+  const hacerReset = async () => {
+    if (!resetU || !resetPass) return;
+    const ok = await confirm({ title: "¿Restablecer contraseña?", message: `${resetU.nombre} deberá iniciar sesión con la nueva clave. Se guarda en Supabase al instante.`, confirmText: "Sí, restablecer" });
+    if (!ok) return;
+    const r = await resetPassAdmin(resetU.id, resetPass);
+    if (!r.ok) { toast(r.error || "No se pudo restablecer", "err"); return; }
+    toast(`Contraseña de ${resetU.nombre} actualizada ✔ Entrégala por un canal seguro y pídele cambiarla desde su perfil`);
+    setResetU(null); setResetPass("");
+  };
 
   const permisos = (rol: Rol) => db.config.rolesPermisos?.[rol] ?? ACCESOS_DEFAULT[rol];
   const rolActivo = (rol: Rol) => db.config.rolesActivos?.[rol] !== false;
@@ -237,10 +250,23 @@ export function Usuarios() {
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { toast("Escribe un correo válido", "err"); return; }
     if (db.usuarios.some((u) => u.id !== form.id && (u.email || "").toLowerCase() === email)) { toast("Ya existe un usuario con ese correo", "err"); return; }
     if (!form.id && nuevaPass.length < 6) { toast("La contraseña debe tener al menos 6 caracteres", "err"); return; }
-    if (form.id && nuevaPass && nuevaPass.length < 6) { toast("La nueva contraseña debe tener al menos 6 caracteres", "err"); return; }
+    /* Política de contraseñas fuertes (módulo de gestión): solo aplica a
+       contraseñas NUEVAS — no bloquea el login con claves antiguas. */
+    if (nuevaPass && nuevaPass.length >= 6) {
+      const faltas = validarPassFuerte(nuevaPass);
+      if (faltas.length) { toast("Contraseña insegura. Falta: " + faltas.join(", ").toLowerCase(), "err"); return; }
+    }
     const ok = await confirm({ title: "¿Desea guardar este registro?", message: "Verifique la información antes de continuar.", confirmText: "Sí, Guardar" });
     if (!ok) return;
-    const password = nuevaPass ? await hashPass(nuevaPass) : form.password;
+    /* Si viene contraseña nueva, la hashea; si es usuario nuevo sin contraseña, usa la por defecto; si es edición sin nueva pass, mantiene la existente */
+    let password = form.password;
+    if (nuevaPass && nuevaPass.length >= 6) {
+      password = await hashPass(nuevaPass);
+    } else if (!form.id && !nuevaPass) {
+      /* Usuario nuevo sin contraseña explícita — usa default según rol */
+      const defaults: Record<Rol, string> = { admin: "JyG-Admin-2026", operador: "JyG-Operador-2026", produccion: "JyG-Produccion-2026", cobranza: "JyG-Cobranza-2026" };
+      password = await hashPass(defaults[form.rol]);
+    }
     saveUsuario({ ...form, email, id: form.id || uid(), password });
     success();
     setForm(null); setNuevaPass("");
@@ -381,6 +407,9 @@ export function Usuarios() {
                     toast(v ? "Usuario activado" : "Usuario desactivado", v ? "ok" : "warn");
                   }} />
                   <div className="d-flex gap-1">
+                    {esAdmin && (
+                      <button className="icon-btn" style={{ width: 28, height: 28 }} title="Restablecer contraseña" onClick={() => { setResetU(u); setResetPass(""); }}><KeyRound size={12} /></button>
+                    )}
                     <button className="icon-btn" style={{ width: 28, height: 28 }} title="Editar" onClick={() => abrirForm(u)}><Pencil size={12} /></button>
                     <button className="icon-btn danger" style={{ width: 28, height: 28 }} title="Eliminar" onClick={() => void eliminarU(u)}><Trash2 size={12} /></button>
                   </div>
@@ -405,17 +434,53 @@ export function Usuarios() {
             <Field label="Correo electrónico (inicio de sesión)" required span="c-12">
               <input className="input" type="email" placeholder="correo@jyg.com.ve" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value.trim().toLowerCase() })} />
             </Field>
-            <Field label={form.id ? "Nueva contraseña (deja vacío para mantener la actual)" : "Contraseña"} required={!form.id} span="c-12">
+            <Field label={form.id ? "Contraseña (mantener la contraseña actual)" : "Contraseña"} span="c-12">
               <div className="d-flex gap-2">
-                <input className="input flex-grow-1" type={verPass ? "text" : "password"} placeholder={form.id ? "••••••••" : "Mínimo 6 caracteres"} value={nuevaPass} onChange={(e) => setNuevaPass(e.target.value)} autoComplete="new-password" />
+                <input 
+                  className="input flex-grow-1" 
+                  type={verPass ? "text" : "password"} 
+                  placeholder={form.id ? "Contraseña actual guardada" : "Mínimo 6 caracteres"} 
+                  value={nuevaPass} 
+                  onChange={(e) => setNuevaPass(e.target.value)} 
+                  autoComplete="new-password" 
+                />
                 <button type="button" className="btn btn-ghost" style={{ flexShrink: 0 }} onClick={() => setVerPass(!verPass)} aria-label="Mostrar contraseña">{verPass ? <EyeOff size={15} /> : <Eye size={15} />}</button>
               </div>
             </Field>
             <div className="c-12" style={{ fontSize: 11.5, color: "var(--ink-faint)" }}>
-              El usuario entrará al CRM con su <b>correo</b> y <b>contraseña</b>, y verá solo los módulos permitidos para su rol <b>{ROL_LABEL[form.rol]}</b>. La contraseña se guarda cifrada.
+              {form.id
+                ? "El usuario entrará al CRM con su correo y contraseña. La contraseña actual está guardada en el sistema."
+                : "El usuario entrará al CRM con su correo y contraseña, y verá solo los módulos permitidos para su rol " + ROL_LABEL[form.rol] + ". La contraseña se guarda cifrada (SHA-256) y se sincroniza a Supabase al instante."}
             </div>
           </div>
           <FormFoot onCancel={() => setForm(null)} onSave={() => void guardarU()} />
+        </Modal>
+      )}
+
+      {resetU && (
+        <Modal open onClose={() => setResetU(null)} title={`Restablecer contraseña — ${resetU.nombre}`}>
+          <div className="f-grid">
+            <Field label="Nueva contraseña" required span="c-12" hint="Mínimo 8 caracteres, una MAYÚSCULA, un número y un símbolo. Se guarda cifrada (SHA-256) y sincroniza a Supabase al instante.">
+              <input className="input" type="password" autoFocus autoComplete="new-password" value={resetPass} onChange={(e) => setResetPass(e.target.value)} />
+            </Field>
+            <div className="c-12" style={{ fontSize: 11.5, color: "var(--ink-faint)" }}>
+              {[
+                { l: "Mínimo 8 caracteres", ok: resetPass.length >= 8 },
+                { l: "Una letra MAYÚSCULA", ok: /[A-Z]/.test(resetPass) },
+                { l: "Un número", ok: /\d/.test(resetPass) },
+                { l: "Un símbolo (!@#$%…)", ok: /[^A-Za-z0-9]/.test(resetPass) },
+              ].map((r) => (
+                <div key={r.l} style={{ color: r.ok ? "var(--ok, #16a34a)" : "inherit" }}>{r.ok ? "✔" : "○"} {r.l}</div>
+              ))}
+              <div className="mt-2">Entrega esta clave temporal por un canal seguro (WhatsApp/teléfono). El miembro podrá cambiarla luego desde su avatar → “Cambiar mi contraseña”.</div>
+            </div>
+          </div>
+          <div className="d-flex gap-2 justify-content-end mt-3">
+            <button className="btn btn-ghost" onClick={() => setResetU(null)}>Cancelar</button>
+            <button className="btn btn-primary" disabled={validarPassFuerte(resetPass).length > 0} onClick={() => void hacerReset()}>
+              <KeyRound size={15} /> Restablecer
+            </button>
+          </div>
         </Modal>
       )}
     </div>

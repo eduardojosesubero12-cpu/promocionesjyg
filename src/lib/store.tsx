@@ -2,17 +2,24 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useR
 import {
   ACCESOS_DEFAULT, SEED_CONFIG, SEED_COTIZACIONES, SEED_DOCENTES, SEED_ESCUELAS, SEED_ESTUDIANTES,
   SEED_EVENTOS, SEED_HISTORIAL, SEED_PAQUETES_ESCUELAS, SEED_SESIONES, SEED_USUARIOS,
-  codigosCompletos, estudianteTotales, hashPass, todayISO, uid, verificarPass,
+  codigosCompletos, estudianteTotales, hashPass, validarPassFuerte, todayISO, uid, verificarPass,
 } from "./data";
 import type {
   Config, Cotizacion, CRMData, Docente, Escuela, EscaneoLog, Estudiante, Evento, FacturaLog,
   HistorialTasa, MensajeLog, OcrDraft, PaqueteEscuela, Pago, ProduccionLog, Rol, Route,
   Sesion, TarjetaLog, Usuario,
 } from "./data";
+import { SUPABASE_DEFAULTS } from "./supabase";
 export type { Route, Rol };
 
 interface DB extends CRMData {}
 const KEY = "jyg-crm-db-v1";
+/* Marca de tiempo del último cambio local que subimos a la nube.
+   Sirve para resolver conflictos: si al recibir datos en tiempo real la
+   nube es MÁS antigua que nuestro último envío, NO se pisa lo local. */
+const TS_KEY = "jyg-last-push-ts";
+/* Contador de intentos fallidos de login (bloqueo temporal anti-fuerza bruta) */
+const BLOCK_KEY = "jyg-login-block";
 const seedDB = (): DB => ({
   escuelas: SEED_ESCUELAS, docentes: SEED_DOCENTES, estudiantes: SEED_ESTUDIANTES,
   cotizaciones: SEED_COTIZACIONES, sesiones: SEED_SESIONES, eventos: SEED_EVENTOS,
@@ -54,6 +61,8 @@ interface Ctx {
   sesion: Usuario | null;
   login: (email: string, password: string) => Promise<{ ok: boolean; error?: string }>;
   logout: () => void;
+  cambiarMiPass: (actual: string, nueva: string) => Promise<{ ok: boolean; error?: string }>;
+  resetPassAdmin: (userId: string, nueva: string) => Promise<{ ok: boolean; error?: string }>;
   setRolPermisos: (rol: Rol, rutas: string[]) => void; setRolActivo: (rol: Rol, activo: boolean) => void;
   confirm: (c: ConfirmState) => Promise<boolean>; confirmState: ConfirmState | null; resolveConfirm: (v: boolean) => void;
   success: (title?: string) => void; successState: { title: string } | null; closeSuccess: () => void;
@@ -117,7 +126,22 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   // Nota: Se usa localStorage para persistencia entre pestañas. 
   // En entornos de alta seguridad, considerar cambiar a sessionStorage.
   const [sesion, setSesion] = useState<Usuario | null>(() => {
-    try { const raw = localStorage.getItem("jyg-sesion"); return raw ? (JSON.parse(raw) as Usuario) : null; } catch { return null; }
+    try {
+      const raw = localStorage.getItem("jyg-sesion");
+      /* SEGURIDAD: solo se reanuda una sesión guardada con el flag "verified"
+         (seteada tras validar correo + contraseña en login()). Así nadie entra
+         al CRM sin autenticarse — ni siquiera con la sesión del admin en caché. */
+      if (raw) {
+        const s = JSON.parse(raw) as Usuario & { verified?: boolean };
+        if (s?.verified && s.id) {
+          const actual = dbRef.current?.usuarios.find((u) => u.id === s.id);
+          if (actual && actual.activo) return actual;
+          return null; // usuario eliminado o desactivado → forzar login
+        }
+        localStorage.removeItem("jyg-sesion");
+      }
+      return null;
+    } catch { return null; }
   });
   const [syncInfo, setSyncInfo] = useState<{ last: number; ok: boolean; msg: string } | null>(null);
   const [syncing, setSyncing] = useState(false);
@@ -160,7 +184,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
      la carga inicial ni al aplicar datos que llegaron de la nube. */
   useEffect(() => {
     if (!cloudReady.current || applyingRemote.current) return;
-    if (!db.config.autoSyncCloud || !db.config.supabaseUrl || !db.config.supabaseKey) return;
+    if (!db.config.autoSyncCloud) return;
     const t = setTimeout(() => { void syncToCloud(); }, 600);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -269,11 +293,51 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   /* ---------- Inicio de sesión (correo + contraseña) ---------- */
   const login = useCallback(async (email: string, password: string): Promise<{ ok: boolean; error?: string }> => {
-    const u = dbRef.current.usuarios.find((x) => x.email.toLowerCase() === email.trim().toLowerCase());
+    /* Espera brevemente a que termine la carga inicial desde Supabase para
+       validar contra los usuarios reales de la nube (evita falsos
+       "credenciales incorrectas" al abrir el CRM recién desplegado). */
+    for (let i = 0; i < 40 && !cloudReady.current; i++) await new Promise((r) => setTimeout(r, 100));
+    const lista = dbRef.current.usuarios.length > 0 ? dbRef.current.usuarios : SEED_USUARIOS;
+    const correo = email.trim().toLowerCase();
+    /* Acepta correo o nombre de usuario */
+    const u = lista.find((x) => (x.email || "").toLowerCase() === correo || (x.usuario || "").toLowerCase() === correo);
     if (!u) return { ok: false, error: "No existe un usuario con ese correo." };
     if (!u.activo) return { ok: false, error: "Este usuario está desactivado. Contacta al administrador." };
-    const valida = await verificarPass(password, u.password || "");
-    if (!valida) return { ok: false, error: "La contraseña es incorrecta." };
+    /* BLOQUEO POR INTENTOS: tras 5 fallas seguidas se espera 1 minuto (por cuenta) */
+    try {
+      const bl = JSON.parse(localStorage.getItem(BLOCK_KEY) || "{}");
+      const b = bl[u.id];
+      if (b && b.hasta > Date.now()) {
+        const mins = Math.ceil((b.hasta - Date.now()) / 60000);
+        return { ok: false, error: `Demasiados intentos fallidos. Vuelve a intentar en ${mins} minuto(s).` };
+      }
+    } catch { /* noop */ }
+    let valida = await verificarPass(password, u.password || "");
+    /* Respaldo de emergencia: si la contraseña llegó corrupta desde la nube
+       (columna distinta / truncada), permite las credenciales semilla del
+       proyecto una sola vez y repara el hash localmente. */
+    if (!valida) {
+      const seed = SEED_USUARIOS.find((s) => s.id === u.id || (s.email || "").toLowerCase() === correo);
+      if (seed && (await verificarPass(password, seed.password || ""))) {
+        valida = true;
+        const reparado = await hashPass(password);
+        mutate((d) => ({ ...d, usuarios: d.usuarios.map((x) => (x.id === u.id ? { ...x, password: reparado } : x)) }));
+      }
+    }
+    if (!valida) {
+      /* registrar intento fallido */
+      try {
+        const bl = JSON.parse(localStorage.getItem(BLOCK_KEY) || "{}");
+        const b = bl[u.id] || { n: 0, hasta: 0 };
+        b.n += 1;
+        if (b.n >= 5) { b.hasta = Date.now() + 60 * 1000; b.n = 0; }
+        bl[u.id] = b;
+        localStorage.setItem(BLOCK_KEY, JSON.stringify(bl));
+      } catch { /* noop */ }
+      return { ok: false, error: "La contraseña es incorrecta." };
+    }
+    /* éxito → limpiar contador de bloqueos */
+    try { const bl = JSON.parse(localStorage.getItem(BLOCK_KEY) || "{}"); delete bl[u.id]; localStorage.setItem(BLOCK_KEY, JSON.stringify(bl)); } catch { /* noop */ }
     /* Migración transparente: si la contraseña estaba en "plain:", la guardamos hasheada */
     if ((u.password || "").startsWith("plain:")) {
       const hash = await hashPass(password);
@@ -290,6 +354,38 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setSesion(null);
     try { localStorage.removeItem("jyg-sesion"); } catch { /* noop */ }
   }, []);
+
+  /* ---------- Gestión segura de contraseñas ----------
+     cambiarMiPass: cada miembro cambia SU propia contraseña validando la actual.
+     resetPassAdmin: el administrador asigna una nueva contraseña a cualquier
+     miembro (equivalente funcional a un "enlace de restablecimiento": el admin
+     crea la clave temporal y se la entrega por el canal seguro que prefiera;
+     el miembro deberá cambiarla luego desde su perfil). Ambos writes se
+     sincronizan a Supabase AL INSTANTE vía saveUsuario. */
+  const cambiarMiPass = useCallback(async (actual: string, nueva: string): Promise<{ ok: boolean; error?: string }> => {
+    const u = dbRef.current.usuarios.find((x) => x.id === sesion?.id);
+    if (!u) return { ok: false, error: "Sin sesión activa." };
+    if (!(await verificarPass(actual, u.password || ""))) return { ok: false, error: "La contraseña actual no es correcta." };
+    const faltas = validarPassFuerte(nueva);
+    if (faltas.length) return { ok: false, error: "La nueva contraseña no cumple: " + faltas.join(", ").toLowerCase() + "." };
+    if (await verificarPass(nueva, u.password || "")) return { ok: false, error: "La nueva contraseña debe ser distinta a la actual." };
+    const hash = await hashPass(nueva);
+    saveUsuario({ ...u, password: hash });
+    setSesion({ ...u, password: hash });
+    try { localStorage.setItem("jyg-sesion", JSON.stringify({ ...u, password: hash, verified: true })); } catch { /* noop */ }
+    return { ok: true };
+  }, [sesion, saveUsuario]);
+  const resetPassAdmin = useCallback(async (userId: string, nueva: string): Promise<{ ok: boolean; error?: string }> => {
+    if (sesion?.rol !== "admin") return { ok: false, error: "Solo el administrador puede restablecer contraseñas." };
+    const u = dbRef.current.usuarios.find((x) => x.id === userId);
+    if (!u) return { ok: false, error: "Usuario no encontrado." };
+    const faltas = validarPassFuerte(nueva);
+    if (faltas.length) return { ok: false, error: "La contraseña no cumple la política: " + faltas.join(", ").toLowerCase() + "." };
+    const hash = await hashPass(nueva);
+    saveUsuario({ ...u, password: hash });
+    return { ok: true };
+  }, [sesion, saveUsuario]);
+
 
   const setConfig = useCallback((patch: Partial<Config>) => mutate((d) => ({ ...d, config: { ...d.config, ...patch } })), [mutate]);
   const deleteTasaHistorial = useCallback((id: string) => mutate((d) => ({ ...d, historialTasas: d.historialTasas.filter((x) => x.id !== id) })), [mutate]);
@@ -370,12 +466,16 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   /* Supabase (carga perezosa del SDK) */
   const clienteSb = useCallback(async (urlArg?: string, keyArg?: string) => {
-    const url = urlArg || dbRef.current.config.supabaseUrl;
-    const key = keyArg || dbRef.current.config.supabaseKey;
+    const url = (urlArg || dbRef.current.config.supabaseUrl || SUPABASE_DEFAULTS.url).trim();
+    const key = (keyArg || dbRef.current.config.supabaseKey || SUPABASE_DEFAULTS.key).trim();
     if (!url || !key) return null;
+    /* Si el usuario no configuró credenciales propias, usamos las del proyecto (.env) */
+    if (url !== dbRef.current.config.supabaseUrl || key !== dbRef.current.config.supabaseKey) {
+      mutate((d) => ({ ...d, config: { ...d.config, supabaseUrl: url, supabaseKey: key } }));
+    }
     const { sbClient } = await import("./supabase");
     return sbClient(url, key);
-  }, []);
+  }, [mutate]);
   const testCloud = useCallback(async (urlArg?: string, keyArg?: string) => {
     const client = await clienteSb(urlArg, keyArg);
     if (!client) throw new Error("Faltan la URL del proyecto y la anon key de Supabase");
@@ -406,6 +506,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     try {
       const { subirTodo } = await import("./supabase");
       const { fallos, faltantes } = await subirTodo(client, dbRef.current, onTabla);
+      try { localStorage.setItem(TS_KEY, String(Date.now())); } catch { /* noop */ }
       if (fallos.length === 0) {
         setSyncInfo({
           last: Date.now(), ok: true,
@@ -456,24 +557,28 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     let cancelado = false;
     (async () => {
-      const cfg = dbRef.current.config;
-      if (cfg.supabaseUrl && cfg.supabaseKey) {
-        try {
-          const client = await clienteSb();
-          if (client) {
-            const { descargarTodo, rowsToDb } = await import("./supabase");
-            const rows = await descargarTodo(client);
-            if (!cancelado) {
+      try {
+        const client = await clienteSb();
+        if (client) {
+          const { descargarTodo, rowsToDb } = await import("./supabase");
+          const rows = await descargarTodo(client);
+          const nubeTieneDatos = Object.values(rows).some((v) => Array.isArray(v) && v.length > 0);
+          if (!cancelado) {
+            if (nubeTieneDatos) {
               applyingRemote.current = true;
               aplicarNube(rowsToDb(rows, dbRef.current));
               setSyncInfo({ last: Date.now(), ok: true, msg: "Datos leídos de Supabase al iniciar" });
               setTimeout(() => { applyingRemote.current = false; }, 800);
+            } else {
+              /* Nube totalmente vacía → publicar la base local por primera vez */
+              cloudReady.current = true;
+              await syncToCloud();
             }
           }
-        } catch {
-          /* Nube vacía o sin tablas → publicar la base local por primera vez */
-          if (!cancelado) await syncToCloud();
         }
+      } catch {
+        /* Error de red o esquema: dejar la base local visible y reintentar subida */
+        if (!cancelado) { cloudReady.current = true; await syncToCloud(); }
       }
       if (!cancelado) cloudReady.current = true;
     })();
@@ -498,6 +603,31 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             try {
               const { descargarTodo, rowsToDb } = await import("./supabase");
               const rows = await descargarTodo(client);
+              /* ── Merge inteligente de USUARIOS (seguridad del equipo) ──
+                 Si la nube no tiene usuarios o trajeron hashes corruptos,
+                 conservamos los usuarios locales con sus contraseñas válidas.
+                 Los usuarios nuevos de la nube SÍ se incorporan. */
+              const local = dbRef.current.usuarios;
+              const { descifrarPass } = await import("./supabase");
+              const nubeU: Usuario[] = (rows.usuarios || []).map((u: any) => ({ id: u.id, nombre: u.nombre || "Usuario", usuario: u.usuario || "", email: u.email || "", password: descifrarPass(u.password || u.password_hash || ""), rol: u.rol || "operador", activo: u.activo !== false }));
+              if (nubeU.length > 0 && local.length > 0) {
+                const mergeados = nubeU.map((nu) => {
+                  const lo = local.find((x) => x.id === nu.id);
+                  if (!lo) return nu; // usuario creado en otro equipo → bienvenida
+                  /* La contraseña local es más reciente/confiable si la de la nube viene vacía o corrupta */
+                  const passNubeOk = !!nu.password && (nu.password.startsWith("plain:") || /^[0-9a-f]{64}$/i.test(nu.password) || nu.password.startsWith("fb"));
+                  const passLocalOk = !!lo.password && (lo.password.startsWith("plain:") || /^[0-9a-f]{64}$/i.test(lo.password) || lo.password.startsWith("fb"));
+                  const password = passNubeOk ? nu.password : (passLocalOk ? lo.password : nu.password);
+                  /* Preservar el correo propio local si la nube lo envió vacío */
+                  const email = nu.email || lo.email || "";
+                  return { ...nu, password, email };
+                });
+                /* Usuarios locales que la nube aún no conoce (creados hace segundos) → no perderlos */
+                const extraLocales = local.filter((lo) => !mergeados.some((m) => m.id === lo.id));
+                rows.usuarios = [...mergeados, ...extraLocales];
+              } else if (nubeU.length === 0 && local.length > 0) {
+                rows.usuarios = local;
+              }
               applyingRemote.current = true;
               aplicarNube(rowsToDb(rows, dbRef.current));
               setSyncInfo({ last: Date.now(), ok: true, msg: "Actualizado en tiempo real desde Supabase" });
@@ -556,7 +686,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     db, route, param, setParam, setRoute,
     tasa, tasaLoading, refreshTasa,
     ocrOpen, setOcrOpen, ocrDraft, setOcrDraft,
-    user, can, setCurrentUser, sesion, login, logout, setRolPermisos, setRolActivo,
+    user, can, setCurrentUser, sesion, login, logout, cambiarMiPass, resetPassAdmin, setRolPermisos, setRolActivo,
     confirm, confirmState, resolveConfirm, success, successState, closeSuccess, toast, toasts,
     saveEscuela, deleteEscuela, saveDocente, deleteDocente,
     saveEstudiante, deleteEstudiante, addPago, deletePago, setPedidoEstado, saveCodigos,

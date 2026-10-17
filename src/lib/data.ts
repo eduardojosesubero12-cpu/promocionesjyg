@@ -4,8 +4,8 @@
 
 export type Rol = "admin" | "operador" | "produccion" | "cobranza";
 export type Route =
-  | "dashboard" | "clientes" | "escuelas" | "docentes" | "estudiantes" | "ventas" | "paquetes"
-  | "cotizaciones" | "mensajes" | "sesiones" | "agenda" | "produccion" | "qr" | "facturas"
+  | "dashboard" | "clientes" | "escuelas" | "docentes" | "estudiantes" | "paquetes"
+  | "mensajes" | "agenda" | "produccion" | "qr" | "facturas"
   | "ocr" | "reportes" | "usuarios" | "config" | "integraciones";
 
 export interface Pago { id: string; fecha: string; monto: number; metodo: string; bs: boolean; tasa: number; usd: number; referencia: string; observacion: string; }
@@ -56,6 +56,21 @@ export async function verificarPass(pw: string, stored: string): Promise<boolean
   if (stored.startsWith("plain:")) return stored.slice(6) === pw;
   return (await hashPass(pw)) === stored;
 }
+
+/* ============================================================
+   POLÍTICA DE CONTRASEÑAS SEGURAS (módulo de gestión)
+   Reglas: mínimo 8 caracteres, una mayúscula, un número y
+   un símbolo. Devuelve la lista de reglas incumplidas.
+   ============================================================ */
+export const PASS_REGLAS = [
+  { label: "Mínimo 8 caracteres", test: (p: string) => p.length >= 8 },
+  { label: "Al menos una letra MAYÚSCULA", test: (p: string) => /[A-Z]/.test(p) },
+  { label: "Al menos un número", test: (p: string) => /\d/.test(p) },
+  { label: "Al menos un símbolo (!@#$%…)", test: (p: string) => /[^A-Za-z0-9]/.test(p) },
+];
+export function validarPassFuerte(pw: string): string[] {
+  return PASS_REGLAS.filter((r) => !r.test(pw)).map((r) => r.label);
+}
 export interface HistorialTasa { id: string; fecha: string; usd: number; euro: number; paralelo: number; fuente: "dolarapi" | "manual"; actualizado: number; }
 export interface PaqueteEscuelaArticulo { nombre: string; cantidad: number; }
 export interface PaqueteEscuela { id: string; escuelaId: string; nombre: string; tipoPaqueteId: string; precio: number; articulos: PaqueteEscuelaArticulo[]; nota: string; activo: boolean; creado: string; }
@@ -94,7 +109,7 @@ export interface ProduccionLog { id: string; fecha: string; detalle: string; mat
 
 export interface CRMData {
   escuelas: Escuela[]; docentes: Docente[]; estudiantes: Estudiante[]; cotizaciones: Cotizacion[];
-  sesiones: Sesion[]; eventos: Evento[]; mensajes: MensajeLog[]; usuarios: Usuario[];
+  eventos: Evento[]; mensajes: MensajeLog[]; usuarios: Usuario[];
   historialTasas: HistorialTasa[]; paquetesEscuelas: PaqueteEscuela[]; config: Config;
   facturas: FacturaLog[]; tarjetas: TarjetaLog[]; escaneos: EscaneoLog[]; produccionLogs: ProduccionLog[];
   currentUserId: string; seqPedido: number; seqCot: number;
@@ -134,7 +149,7 @@ export const ROL_LABEL: Record<Rol, string> = { admin: "Administrador", operador
 export const ROL_DESC: Record<Rol, string> = {
   admin: "Control total del sistema: configuración, usuarios, reportes e integraciones.",
   operador: "Registra estudiantes, escuelas y profesores, y gestiona cotizaciones.",
-  produccion: "Visualiza materiales, cola de producción y sesiones fotográficas.",
+  produccion: "Visualiza materiales, cola de producción y agenda.",
   cobranza: "Gestiona pagos, abonos, saldos y facturación.",
 };
 export const ROLES_INFO: { id: Rol; label: string; desc: string; icon: string; color: string }[] = [
@@ -148,11 +163,10 @@ export const MODULOS_GRUPOS: { seccion: string; icon: string; items: { ruta: str
   { seccion: "CRM", icon: "briefcase", items: [
     { ruta: "clientes", label: "Clientes" }, { ruta: "escuelas", label: "Escuelas" },
     { ruta: "docentes", label: "Profesores" }, { ruta: "estudiantes", label: "Estudiantes" },
-    { ruta: "ventas", label: "Ventas · Pedidos" }, { ruta: "paquetes", label: "Paquetes" },
-    { ruta: "cotizaciones", label: "Cotizaciones" }, { ruta: "mensajes", label: "Mensajes" },
+    { ruta: "paquetes", label: "Paquetes" }, { ruta: "mensajes", label: "Mensajes" },
   ] },
   { seccion: "Operaciones", icon: "gear-wide-connected", items: [
-    { ruta: "sesiones", label: "Sesiones Fotográficas" }, { ruta: "agenda", label: "Agenda / Calendario" },
+    { ruta: "agenda", label: "Agenda / Calendario" },
     { ruta: "produccion", label: "Producción" }, { ruta: "qr", label: "Tarjetas QR" },
     { ruta: "ocr", label: "Escáner Inteligente" }, { ruta: "facturas", label: "Facturación" },
   ] },
@@ -166,9 +180,9 @@ export const MODULOS_GRUPOS: { seccion: string; icon: string; items: { ruta: str
 export const TODOS_MODULOS: string[] = MODULOS_GRUPOS.flatMap((g) => g.items.map((i) => i.ruta));
 export const ACCESOS_DEFAULT: Record<Rol, string[]> = {
   admin: [...TODOS_MODULOS],
-  operador: ["dashboard", "clientes", "escuelas", "docentes", "estudiantes", "ventas", "paquetes", "cotizaciones", "mensajes", "qr", "ocr", "facturas"],
-  produccion: ["dashboard", "paquetes", "produccion", "qr", "sesiones", "agenda"],
-  cobranza: ["dashboard", "clientes", "estudiantes", "ventas", "facturas", "reportes", "mensajes"],
+  operador: ["dashboard", "clientes", "escuelas", "docentes", "estudiantes", "paquetes", "mensajes", "qr", "ocr", "facturas"],
+  produccion: ["dashboard", "paquetes", "produccion", "qr", "agenda"],
+  cobranza: ["dashboard", "clientes", "estudiantes", "facturas", "reportes", "mensajes"],
 };
 
 /* ============================================================
@@ -521,8 +535,21 @@ export const SUPABASE_SCHEMA_SEGURO = (() => {
     p.push(`end $$;`);
     p.push("");
   }
+  
+  // Insertar usuarios semilla con contraseñas hasheadas SHA-256
+  p.push("-- ═══ USUARIOS SEMILLA ═══");
+  p.push("-- Contraseñas hasheadas con SHA-256 + salt 'jyg-crm-2026'");
+  p.push("insert into usuarios (id, nombre, usuario, email, password, rol, activo) values");
+  p.push("  ('u1', 'Administrador JyG', 'admin', 'admin@jyg.com.ve', '5f0ae2cbb8069c94504fd5ae9e473665beb1d698203852d2649e377080fccfc7', 'admin', true),");
+  p.push("  ('u2', 'Operador de Registro', 'registro', 'registro@jyg.com.ve', 'b67fd967f716feccf44d58a12e2ad87f7b82e8f12e1e384680dc479a29ff06e3', 'operador', true),");
+  p.push("  ('u3', 'Equipo de Producción', 'produccion', 'produccion@jyg.com.ve', '022b4a1f616de4e18bf3667c32574cd86baddfb1bd7b31c265e8241091db4fed', 'produccion', true),");
+  p.push("  ('u4', 'Cobranza', 'cobranza', 'cobranza@jyg.com.ve', 'fbb2d2679a946742fb3815a86b10a079c0e389f31aa37ee4244bdd2d4a2e01f2', 'cobranza', true)");
+  p.push("on conflict (id) do update set nombre = excluded.nombre, usuario = excluded.usuario, email = excluded.email, rol = excluded.rol, activo = excluded.activo;");
+  p.push("");
+  
   p.push("-- ═══ LISTO ═══");
   p.push("-- Las 18 tablas están creadas, con RLS y tiempo real activos.");
+  p.push("-- Los usuarios semilla están insertados con contraseñas hasheadas.");
   p.push("-- En el CRM pulsa \"Verificar ahora\" y luego \"Subir base completa\".");
   return p.join("\n");
 })();
@@ -815,13 +842,28 @@ export const SUPABASE_SETUP_SQL = (() => {
    Se genera dinámicamente a partir de la lista de faltantes
    detectada por la verificación de conexión.
    ============================================================ */
+/* Devuelve el bloque "create table if not exists X (...);" del esquema maestro.
+   Busca primero en la sección principal y, si no aparece, en todo el SQL. */
+function _bloqueTabla(t: string): string | null {
+  const secciones = SUPABASE_SQL.split(/-- ═+ /);
+  const principal = secciones.length > 1 ? secciones[1] : SUPABASE_SQL;
+  const re = new RegExp(`create table if not exists ${t} \\([\\s\\S]*?\\);`, "m");
+  const m = principal.match(re) || SUPABASE_SQL.match(re);
+  return m ? m[0] : null;
+}
+
 export function sqlParaTablasFaltantes(faltantes: string[]): string {
   if (!faltantes.length) return "";
   const bloques: string[] = [];
   for (const t of faltantes) {
-    const re = new RegExp(`create table if not exists ${t} \\([\\s\\S]*?\\);`, "m");
-    const m = SUPABASE_SQL.match(re);
-    if (m) bloques.push(m[0]);
+    const m = _bloqueTabla(t);
+    if (m) bloques.push(m);
+    /* Si la tabla ya existía con un esquema antiguo, se agregan las columnas
+       que faltan (IF NOT EXISTS: no borra ni pisa datos existentes). */
+    const def = ESQUEMA_TABLAS.find((x) => x.tabla === t);
+    if (def) for (const [col, tipo] of def.columnas) {
+      bloques.push(`alter table ${t} add column if not exists ${col} ${tipo.replace(/ references \w+\(id\)( on delete cascade)?/i, "")};`);
+    }
     bloques.push(`alter table ${t} enable row level security;`);
     bloques.push(`drop policy if exists "crm_all" on ${t};`);
     bloques.push(`create policy "crm_all" on ${t} for all using (true) with check (true);`);

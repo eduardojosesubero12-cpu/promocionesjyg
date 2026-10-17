@@ -5,124 +5,13 @@ import {
   ShieldCheck, Sparkles, Trash2, Upload, UserPlus, Users, X, ZoomIn, ZoomOut,
 } from "lucide-react";
 import { useApp } from "../lib/store";
-import type { Estudiante, Evento, OcrDraft, Sesion } from "../lib/data";
+import type { Estudiante, Evento, OcrDraft } from "../lib/data";
 import {
   ESTADOS_PEDIDO, OPENROUTER_MODELOS, ORDEN_MATERIALES, PAQUETES, buildPortalData, codigosCompletos,
   computeProduccion, downloadFile, estudianteTotales, extractWithQwen, fmtBs, fmtFecha,
   fmtUSD, generarPortalHtml, ocrNombreCompleto, parseOcrLocal, portalUrl, slugEstudiante, todayISO, uid,
 } from "../lib/data";
 import { Badge, Bar, EmptyState, Field, FilterSelect, FormFoot, FormSec, Modal, QR, SearchInput, SectionHead, Toolbar, estadoPagoTone, estadoPedidoTone, useNow } from "../components/ui";
-
-/* ============================================================
-   SESIONES FOTOGRÁFICAS
-   ============================================================ */
-const sesionVacia = (): Sesion => ({ id: "", escuelaId: "", fecha: todayISO(), hora: "09:00", fotografo: "", estado: "Agendada", fotos: 0, nota: "" });
-
-export function Sesiones() {
-  const { db, saveSesion, deleteSesion, confirm, success, toast } = useApp();
-  const [form, setForm] = useState<Sesion | null>(null);
-  const [errs, setErrs] = useState<Record<string, string>>({});
-
-  const guardar = async () => {
-    if (!form) return;
-    const er: Record<string, string> = {};
-    if (!form.escuelaId) er.escuelaId = "Selecciona la escuela";
-    if (!form.fotografo.trim()) er.fotografo = "Indica el fotógrafo";
-    setErrs(er);
-    if (Object.keys(er).length) return;
-    const ok = await confirm({ title: "¿Desea guardar este registro?", message: "Verifique la información antes de continuar.", confirmText: "Sí, Guardar" });
-    if (!ok) return;
-    saveSesion({ ...form, id: form.id || uid() });
-    success();
-    setForm(null);
-  };
-  const eliminar = async (s: Sesion) => {
-    const ok = await confirm({ title: "¿Está seguro de eliminar este registro?", message: "Se eliminará la sesión fotográfica.", confirmText: "Eliminar", danger: true });
-    if (!ok) return;
-    deleteSesion(s.id);
-    toast("Registro eliminado", "warn");
-  };
-  const lista = [...db.sesiones].sort((a, b) => a.fecha.localeCompare(b.fecha));
-
-  return (
-    <div className="page">
-      <div className="page-head">
-        <div>
-          <div className="crumb">Operaciones</div>
-          <h1>Sesiones Fotográficas</h1>
-          <p style={{ fontSize: 13.5, margin: "4px 0 0", color: "var(--ink-soft)" }}>Tomas de toga, birrete, carnet y firma de libro por plantel</p>
-        </div>
-        <button className="btn btn-primary" onClick={() => { setErrs({}); setForm(sesionVacia()); }}>Agregar sesión</button>
-      </div>
-
-      <div className="row g-3">
-        {lista.map((s, i) => {
-          const es = db.escuelas.find((x) => x.id === s.escuelaId);
-          const n = db.estudiantes.filter((e) => e.escuelaId === s.escuelaId).length;
-          return (
-            <div key={s.id} className="col-12 col-md-6 col-xl-4">
-              <div className="card p-3 p-md-4 h-100 reveal card-lift" style={{ animationDelay: `${Math.min(i, 8) * 60}ms` }}>
-                <div className="d-flex align-items-start gap-3">
-                  <div className="d-flex flex-column align-items-center justify-content-center rounded-3 flex-shrink-0" style={{ width: 58, height: 58, background: s.estado === "Realizada" ? "var(--tint-ok)" : "linear-gradient(150deg,var(--jyg-navy),#0b2e52)", color: s.estado === "Realizada" ? "var(--ok)" : "#ffd970" }}>
-                    <span className="font-display fw-bold" style={{ fontSize: 18, lineHeight: 1 }}>{s.fecha.slice(8, 10)}</span>
-                    <span style={{ fontSize: 9, textTransform: "uppercase", letterSpacing: 1, opacity: .8 }}>{new Date(s.fecha + "T12:00").toLocaleDateString("es-VE", { month: "short" })}</span>
-                  </div>
-                  <div className="flex-grow-1" style={{ minWidth: 0 }}>
-                    <div className="d-flex align-items-center gap-2 flex-wrap">
-                      <h3 className="font-display fw-bold text-truncate m-0" style={{ fontSize: 14.5 }}>{es?.nombre || "Escuela"}</h3>
-                      <Badge tone={s.estado === "Realizada" ? "green" : "blue"} dot>{s.estado}</Badge>
-                    </div>
-                    <p className="m-0 mt-1" style={{ fontSize: 12, color: "var(--ink-soft)" }}>
-                      {s.hora} h · <Camera size={11} className="me-1" style={{ verticalAlign: -1 }} />{s.fotografo} · {n} estudiantes
-                    </p>
-                    {s.nota && <p className="m-0 mt-1" style={{ fontSize: 11.5, fontStyle: "italic", color: "var(--ink-faint)" }}>{s.nota}</p>}
-                    {s.estado === "Realizada" && <div className="mt-2"><Badge tone="gold">{s.fotos} fotos capturadas</Badge></div>}
-                  </div>
-                  <div className="d-flex flex-column gap-1">
-                    <button className="icon-btn" title="Editar" style={{ width: 30, height: 30 }} onClick={() => { setErrs({}); setForm(s); }}><Pencil size={13} /></button>
-                    <button className="icon-btn danger" title="Eliminar" style={{ width: 30, height: 30 }} onClick={() => eliminar(s)}><Trash2 size={13} /></button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-      {lista.length === 0 && <div className="card mt-3"><EmptyState icon={Camera} title="Sin sesiones" text="Agenda la primera toma fotográfica." /></div>}
-
-      {form && (
-        <Modal open onClose={() => setForm(null)} size="lg" title={form.id ? "Editar sesión" : "Nueva sesión fotográfica"}>
-          <div className="f-grid">
-            <FormSec icon={<Camera size={15} />}>Datos de la toma</FormSec>
-            <Field label="Escuela" required error={errs.escuelaId} span="c-12">
-              <select className={`select ${errs.escuelaId ? "err" : ""}`} value={form.escuelaId} onChange={(e) => setForm({ ...form, escuelaId: e.target.value })}>
-                <option value="">— Seleccione —</option>
-                {db.escuelas.map((e) => <option key={e.id} value={e.id}>{e.nombre}</option>)}
-              </select>
-            </Field>
-            <Field label="Fecha" span="c-4"><input type="date" className="input" value={form.fecha} onChange={(e) => setForm({ ...form, fecha: e.target.value })} /></Field>
-            <Field label="Hora" span="c-4"><input type="time" className="input" value={form.hora} onChange={(e) => setForm({ ...form, hora: e.target.value })} /></Field>
-            <Field label="Fotógrafo(a)" required error={errs.fotografo} span="c-4">
-              <input className={`input ${errs.fotografo ? "err" : ""}`} value={form.fotografo} onChange={(e) => setForm({ ...form, fotografo: e.target.value })} />
-            </Field>
-            <Field label="Estado" span="c-4">
-              <select className="select" value={form.estado} onChange={(e) => setForm({ ...form, estado: e.target.value as Sesion["estado"] })}>
-                <option>Agendada</option><option>Realizada</option>
-              </select>
-            </Field>
-            {form.estado === "Realizada" && (
-              <Field label="Fotos capturadas" span="c-4">
-                <input type="number" min={0} className="input" value={form.fotos} onChange={(e) => setForm({ ...form, fotos: Number(e.target.value) || 0 })} />
-              </Field>
-            )}
-            <Field label="Nota" span="c-12"><textarea className="textarea" value={form.nota} onChange={(e) => setForm({ ...form, nota: e.target.value })} /></Field>
-          </div>
-          <FormFoot onCancel={() => setForm(null)} onSave={guardar} />
-        </Modal>
-      )}
-    </div>
-  );
-}
 
 /* ============================================================
    AGENDA / CALENDARIO
