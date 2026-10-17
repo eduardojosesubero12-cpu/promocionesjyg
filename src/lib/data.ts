@@ -74,6 +74,10 @@ export interface Config {
   preciosPaquetes: number[];
   usarApi: boolean; usarTasaManual: boolean; tasaFallback: number; tasaManualUSD: number; tasaManualEUR: number;
   historialAuto: boolean; supabaseUrl: string; supabaseKey: string; autoSyncCloud: boolean;
+  /* Clave SERVICE_ROLE (sk-...) de Supabase: activa la autenticación nativa
+     (supabase.auth). Solo se usa para administrar usuarios; si está vacía,
+     el CRM funciona con el esquema legacy local. NUNCA es la anon key. */
+  supabaseServiceKey?: string;
   rolesPermisos?: Record<Rol, string[]>;
   rolesActivos?: Record<Rol, boolean>;
   /* Motor de escaneo IA — Qwen vía OpenRouter (se guarda en Supabase con la config) */

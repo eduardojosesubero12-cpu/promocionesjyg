@@ -887,7 +887,9 @@ export function Integraciones() {
   const { db, setConfig, confirm, success, toast, testCloud, syncToCloud, restoreFromCloud, syncInfo, syncing, rtEstado, cloudStatus, testCloudNow, deleteTasaHistorial, clearTasaHistorial } = useApp();
   const [sbUrl, setSbUrl] = useState(db.config.supabaseUrl);
   const [sbKey, setSbKey] = useState(db.config.supabaseKey);
+  const [sbSvc, setSbSvc] = useState(db.config.supabaseServiceKey || "");
   const [verKey, setVerKey] = useState(false);
+  const [verSvc, setVerSvc] = useState(false);
   const [test, setTest] = useState<"idle" | "busy" | "ok" | "fail">("idle");
   const [testInfo, setTestInfo] = useState<{ tablas: number; filas: number } | null>(null);
   const [verSql, setVerSql] = useState(false);
@@ -898,9 +900,9 @@ export function Integraciones() {
   const histRef = useRef<HTMLInputElement>(null);
 
   const guardarSb = async () => {
-    const ok = await confirm({ title: "¿Desea guardar este registro?", message: "Las credenciales de Supabase se guardarán en este navegador.", confirmText: "Sí, Guardar" });
+    const ok = await confirm({ title: "¿Desea guardar este registro?", message: "Las credenciales de Supabase se guardarán en este navegador." + (sbSvc.trim() ? " La service role key permite gestionar usuarios reales en Supabase Auth: trátala como un secreto." : ""), confirmText: "Sí, Guardar" });
     if (!ok) return;
-    setConfig({ supabaseUrl: sbUrl.trim(), supabaseKey: sbKey.trim(), autoSyncCloud: autoSync });
+    setConfig({ supabaseUrl: sbUrl.trim(), supabaseKey: sbKey.trim(), autoSyncCloud: autoSync, supabaseServiceKey: sbSvc.trim() });
     success("Credenciales de Supabase guardadas");
   };
   const probar = async () => {
@@ -999,6 +1001,19 @@ export function Integraciones() {
                   <button className="icon-btn" title={verKey ? "Ocultar" : "Mostrar"} onClick={() => setVerKey(!verKey)}>{verKey ? <EyeOff size={15} /> : <Eye size={15} />}</button>
                 </div>
               </Field>
+            </div>
+            <div className="mt-3">
+              <Field label="Service role key (opcional · autenticación nativa)">
+                <div className="d-flex gap-1">
+                  <input type={verSvc ? "text" : "password"} className="input" style={{ fontFamily: "ui-monospace, monospace", fontSize: 12 }} placeholder="eyJhbGciOiJIUzI1NiIs… (o sb_secret_…)" value={sbSvc} onChange={(e) => setSbSvc(e.target.value)} />
+                  <button className="icon-btn" title={verSvc ? "Ocultar" : "Mostrar"} onClick={() => setVerSvc(!verSvc)}>{verSvc ? <EyeOff size={15} /> : <Eye size={15} />}</button>
+                </div>
+              </Field>
+              <p className="mt-1 mb-0" style={{ fontSize: 11.5, color: "var(--ink-soft)" }}>
+                {sbSvc.trim()
+                  ? <><ShieldCheck size={12} style={{ verticalAlign: -2, color: "var(--ok)" }} /> Autenticación nativa ACTIVA: cada contraseña del equipo se registra como usuario real en Supabase Auth (bcrypt + JWT). Los miembros aparecerán en Dashboard → Authentication → Users.</>
+                  : <>Sin esta clave el CRM usa el esquema local (tabla usuarios). Para activarla: Supabase → Project Settings → API → <b>service_role</b> (secret). Es la única credencial que puede crear/eliminar usuarios de Auth — guárdala solo aquí, nunca la compartas ni la subas a GitHub.</>}
+              </p>
             </div>
             <div className="d-flex gap-2 flex-wrap mt-3 align-items-center">
               <button className="btn btn-primary btn-sm" onClick={() => void guardarSb()}><Save size={14} /> Guardar credenciales</button>
