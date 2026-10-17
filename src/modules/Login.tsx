@@ -22,6 +22,7 @@ export default function Login() {
   const [modo, setModo] = useState<"login" | "rec-solicitar" | "rec-codigo">("login");
   const [recCorreo, setRecCorreo] = useState("");
   const [recCodigo, setRecCodigo] = useState("");
+  const [recCodigoInput, setRecCodigoInput] = useState("");
   const [recNueva, setRecNueva] = useState("");
   const [recConfirmar, setRecConfirmar] = useState("");
   const [recMsg, setRecMsg] = useState("");
@@ -52,21 +53,23 @@ export default function Login() {
     setCargando(false);
     if (!r.ok) { setRecMsg(r.error || "No se pudo generar el código."); disparar(); return; }
     setRecCodigo(r.codigo || "");
+    setRecCodigoInput("");
     setModo("rec-codigo");
   };
   const definirNueva = async (e?: React.FormEvent) => {
     e?.preventDefault();
     setRecMsg("");
+    if (!recCodigoInput.trim()) { setRecMsg("Escribe el código temporal de 6 dígitos que se muestra arriba."); disparar(); return; }
     if (recNueva !== recConfirmar) { setRecMsg("La confirmación no coincide con la nueva contraseña."); disparar(); return; }
     setCargando(true);
-    const r = await restablecerPass(recCorreo, recCodigo, recNueva);
+    const r = await restablecerPass(recCorreo, recCodigoInput, recNueva);
     setCargando(false);
     if (!r.ok) { setRecMsg(r.error || "No se pudo cambiar la contraseña."); disparar(); return; }
     setRecOk(true);
     setPass(""); setEmail(recCorreo);
   };
   const volverLogin = () => {
-    setModo("login"); setRecMsg(""); setRecOk(false); setRecNueva(""); setRecConfirmar(""); setRecCorreo(""); setRecCodigo("");
+    setModo("login"); setRecMsg(""); setRecOk(false); setRecNueva(""); setRecConfirmar(""); setRecCorreo(""); setRecCodigo(""); setRecCodigoInput("");
   };
 
   return (
@@ -244,6 +247,14 @@ export default function Login() {
                 </button>
                 <p style={{ fontSize: 11, marginTop: 8, opacity: 0.9 }}>Si otra persona pidió este código por ti, compártelo solo por canal seguro.</p>
               </div>
+
+              <label className="login-field">
+                <span>Código temporal (o clave maestra del admin)</span>
+                <div className="login-input">
+                  <KeyRound size={16} />
+                  <input type="text" placeholder="Escribe los 6 dígitos" value={recCodigoInput} onChange={(e) => { setRecCodigoInput(e.target.value); setRecMsg(""); }} autoComplete="one-time-code" autoFocus />
+                </div>
+              </label>
 
               <label className="login-field">
                 <span>Nueva contraseña</span>

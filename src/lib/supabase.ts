@@ -411,6 +411,40 @@ export async function desactivarAuthUser(client: SupabaseClient, email: string):
   } catch { /* noop: la fila espejo + RLS siguen bloqueando el acceso */ }
 }
 
+/* ¿Existe este correo como usuario real de Supabase Auth? */
+export async function existeEnAuth(client: SupabaseClient, email: string): Promise<boolean> {
+  try {
+    const { data: lista } = await client.auth.admin.listUsers({ page: 1, perPage: 1000 });
+    return (lista?.users || []).some((u: any) => (u.email || "").toLowerCase() === (email || "").toLowerCase());
+  } catch { return false; }
+}
+
+/* Cambio directo de clave en supabase.auth sin conocer la anterior
+   (requiere service role — solo lo usa el flujo de recuperación).
+   Si el usuario no existe todavía en Auth, se crea con la nueva clave. */
+export async function forzarPassAuth(client: SupabaseClient, email: string, passPlana: string, meta?: { nombre?: string; usuario?: string; rol?: string }): Promise<ResultadoAuth> {
+  const correo = (email || "").trim();
+  if (!correo) return { ok: false, error: "Falta el correo del usuario." };
+  let existente: any = null;
+  try {
+    const { data: lista } = await client.auth.admin.listUsers({ page: 1, perPage: 1000 });
+    existente = (lista?.users || []).find((x: any) => (x.email || "").toLowerCase() === correo.toLowerCase()) || null;
+  } catch (e: any) {
+    return { ok: false, error: `Sin acceso a supabase.auth (service role): ${e?.message || e}` };
+  }
+  if (existente) {
+    const { error } = await client.auth.admin.updateUserById(existente.id, { password: passPlana });
+    if (error) return { ok: false, error: error.message };
+    return { ok: true };
+  }
+  const { error } = await client.auth.admin.createUser({
+    email: correo, password: passPlana, email_confirm: true,
+    user_metadata: { nombre: meta?.nombre, usuario: meta?.usuario, rol: meta?.rol },
+  });
+  if (error) return { ok: false, error: error.message };
+  return { ok: true };
+}
+
 export async function descargarTodo(client: SupabaseClient): Promise<Record<string, any[]>> {
   const rows: Record<string, any[]> = {};
   for (const { tabla } of DB_TABLES) {

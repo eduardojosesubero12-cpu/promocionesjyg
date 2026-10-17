@@ -7,9 +7,9 @@ import { useApp } from "../lib/store";
 import type { CatAdicional, PaqueteEscuela, Rol, Usuario } from "../lib/data";
 import {
   ACCESOS_DEFAULT, API_DOLARES, API_EUROS, DB_TABLES, MODULOS_GRUPOS, OPENROUTER_MODELOS, ORDEN_MATERIALES,
-  PAQUETES, ROL_DESC, ROL_LABEL, ROLES_INFO, SUPABASE_SCHEMA_SEGURO, TODOS_MODULOS,
+  PAQUETES, ROL_DESC, ROL_LABEL, ROLES_INFO, SEED_USUARIOS, SUPABASE_SCHEMA_SEGURO, TODOS_MODULOS,
   computeProduccion, downloadFile, estudianteTotales, fmtBs, fmtFecha, fmtFechaHoraViva, fmtHaceSegundos,
-  fmtUSD, getAdicionales, getGrados, getSecciones, getTallas, hashPass, toCSV, todayISO, uid, validarPassFuerte,
+  fmtUSD, getAdicionales, getGrados, getSecciones, getTallas, hashPass, toCSV, todayISO, uid, validarPassFuerte, verificarPass,
 } from "../lib/data";
 import {
   Badge, Bar, EmptyState, Field, FilterSelect, FormFoot, FormSec, Modal, SearchInput, SectionHead,
@@ -904,6 +904,33 @@ export function Integraciones() {
     if (!ok) return;
     setConfig({ supabaseUrl: sbUrl.trim(), supabaseKey: sbKey.trim(), autoSyncCloud: autoSync, supabaseServiceKey: sbSvc.trim() });
     success("Credenciales de Supabase guardadas");
+    /* Al activar la autenticación nativa, espejamos TODAS las contraseñas
+       actuales del equipo en supabase.auth (bcrypt en servidor). Así nadie
+       queda encerrado por tener la tabla espejo con hashes corruptos: Auth
+       pasa a ser la fuente de verdad y coincide con lo que cada quien usa. */
+    if (sbSvc.trim()) {
+      (async () => {
+        try {
+          const { sbClient, upsertAuthUser } = await import("../lib/supabase");
+          const ac = sbClient(sbUrl.trim(), sbKey.trim(), sbSvc.trim());
+          let exitosos = 0, fallidos = 0;
+          for (const u of db.usuarios.filter((x) => x.email)) {
+            let plana = "";
+            if ((u.password || "").startsWith("plain:")) plana = u.password.slice(6);
+            else {
+              const seed = SEED_USUARIOS.find((s) => s.id === u.id || (s.email || "").toLowerCase() === (u.email || "").toLowerCase());
+              if (seed && (await verificarPass(seed.password.startsWith("plain:") ? seed.password.slice(6) : "", u.password || ""))) plana = seed.password.slice(6);
+              else if (seed && (await verificarPass(u.password || "", seed.password || ""))) plana = u.password; /* hash local == semilla: la nube tiene la semilla */
+              else if (seed) plana = seed.password.startsWith("plain:") ? seed.password.slice(6) : "";
+            }
+            if (!plana) { fallidos++; continue; }
+            const r = await upsertAuthUser(ac, u, plana, { crearFila: false });
+            if (r.ok || r.requiereCambio) exitosos++; else fallidos++;
+          }
+          toast(fallidos === 0 ? `Supabase Auth sincronizado ✓ (${exitosos} usuarios)` : `Auth sincronizado: ${exitosos} OK · ${fallidos} con error`, fallidos === 0 ? "ok" : "warn");
+        } catch { /* noop */ }
+      })();
+    }
   };
   const probar = async () => {
     setTest("busy");

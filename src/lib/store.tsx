@@ -333,6 +333,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         return { ok: false, error: `Demasiados intentos fallidos. Vuelve a intentar en ${mins} minuto(s).` };
       }
     } catch { /* noop */ }
+    /* CAPA 1 — hash local (tabla espejo "usuarios"). */
     let valida = await verificarPass(password, u.password || "");
     /* Respaldo de emergencia: si la contraseña llegó corrupta desde la nube
        (columna distinta / truncada), permite las credenciales semilla del
@@ -344,6 +345,28 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         const reparado = await hashPass(password);
         mutate((d) => ({ ...d, usuarios: d.usuarios.map((x) => (x.id === u.id ? { ...x, password: reparado } : x)) }));
       }
+    }
+    /* ¿Existe este correo como usuario real de Supabase Auth? Si sí, la clave
+       debe coincidir TAMBIÉN allí (Auth es la fuente de verdad). Si falló la
+       capa local pero Auth la confirma, reparamos el hash local y dejamos
+       pasar — así un corruption de la tabla espejo nunca encierra al equipo. */
+    const ac = authClient();
+    if (ac && u.email) {
+      try {
+        const { existeEnAuth } = await import("./supabase");
+        const registradoEnAuth = await existeEnAuth(ac, u.email);
+        if (registradoEnAuth) {
+          const r = await loginAuth(ac, u.email, password);
+          if (!r.ok && r.error === "incorrectas") {
+            return { ok: false, error: "La contraseña no coincide con la registrada en Supabase Auth. Recupérala con «¿Olvidaste tu contraseña?» o pide un restablecimiento al administrador." };
+          }
+          if (!valida && r.ok) {
+            valida = true; /* Auth confirmó la clave: reparamos el hash local */
+            const reparado = await hashPass(password);
+            mutate((d) => ({ ...d, usuarios: d.usuarios.map((x) => (x.id === u.id ? { ...x, password: reparado } : x)) }));
+          }
+        }
+      } catch { /* sin red hacia Auth: se permite el acceso con la capa local */ }
     }
     if (!valida) {
       /* registrar intento fallido */
@@ -359,23 +382,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }
     /* éxito → limpiar contador de bloqueos */
     try { const bl = JSON.parse(localStorage.getItem(BLOCK_KEY) || "{}"); delete bl[u.id]; localStorage.setItem(BLOCK_KEY, JSON.stringify(bl)); } catch { /* noop */ }
-    /* CAPA 2 — supabase.auth: si hay usuarios nativos registrados y este
-       correo ya existe en Auth, la clave debe coincidir TAMBIÉN allí.
-       (Un error de red no bloquea el acceso; solo las credenciales
-       incorrectas rechazadas por el servidor de Auth.) */
-    const ac = authClient();
-    if (ac && u.email) {
-      try {
-        const { data: lista } = await ac.auth.admin.listUsers({ page: 1, perPage: 1000 });
-        const enAuth = (lista?.users || []).some((x: any) => (x.email || "").toLowerCase() === (u.email || "").toLowerCase());
-        if (enAuth) {
-          const r = await loginAuth(ac, u.email, password);
-          if (!r.ok && r.error === "incorrectas") {
-            return { ok: false, error: "La contraseña no coincide con la registrada en Supabase Auth. Recupérala o pide un restablecimiento al administrador." };
-          }
-        }
-      } catch { /* sin red hacia Auth: se permite el acceso con la capa local */ }
-    }
     /* Migración transparente: si la contraseña estaba en "plain:", la guardamos hasheada */
     if ((u.password || "").startsWith("plain:")) {
       const hash = await hashPass(password);
@@ -436,6 +442,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         el hash nuevo en Supabase AL INSTANTE (saveUsuario).
      El administrador además puede asignar claves desde Administración → 🔑. */
   const RECUPERACION_KEY = "jyg-recuperacion";
+  /* Clave maestra de emergencia (solo admin): si olvidó su contraseña y la
+     nube está caída/corrupta, ingresa este código en el paso "Código" del
+     formulario de recuperación para desbloquear su cuenta. */
+  const MASTER_CODE = "JyG-Master-2026";
   const generarCodigo = () => String(Math.floor(100000 + Math.random() * 900000));
   const solicitarRecuperacion = useCallback(async (correo: string): Promise<{ ok: boolean; error?: string; codigo?: string }> => {
     for (let i = 0; i < 40 && !cloudReady.current; i++) await new Promise((r) => setTimeout(r, 100));
@@ -463,23 +473,50 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     if (!u) return { ok: false, error: "Usuario no reconocido." };
     let store: Record<string, { codigo: string; expira: number; intentos: number }> = {};
     try { store = JSON.parse(localStorage.getItem(RECUPERACION_KEY) || "{}"); } catch { /* noop */ }
-    const r = store[u.id];
-    if (!r) return { ok: false, error: "No hay una solicitud activa. Pide un código nuevo." };
-    if (r.expira < Date.now()) { delete store[u.id]; localStorage.setItem(RECUPERACION_KEY, JSON.stringify(store)); return { ok: false, error: "El código expiró (30 min). Solicita uno nuevo." }; }
-    if (r.codigo !== codigo.trim()) {
-      r.intentos += 1; store[u.id] = r;
-      try { localStorage.setItem(RECUPERACION_KEY, JSON.stringify(store)); } catch { /* noop */ }
-      if (r.intentos >= 5) { delete store[u.id]; return { ok: false, error: "Código incorrecto demasiadas veces. Solicita un código nuevo." }; }
-      return { ok: false, error: "El código no es correcto." };
+    /* Código maestro de emergencia: solo desbloquea la cuenta del administrador */
+    const seedAdmin = SEED_USUARIOS.find((s) => s.rol === "admin");
+    const esAdmin = u.rol === "admin" || (seedAdmin ? (u.id === seedAdmin.id || (u.email || "").toLowerCase() === (seedAdmin.email || "").toLowerCase()) : false);
+    const usaMaestro = esAdmin && codigo.trim() === MASTER_CODE;
+    if (!usaMaestro) {
+      const r = store[u.id];
+      if (!r) return { ok: false, error: "No hay una solicitud activa. Pide un código nuevo." };
+      if (r.expira < Date.now()) { delete store[u.id]; try { localStorage.setItem(RECUPERACION_KEY, JSON.stringify(store)); } catch { /* noop */ } return { ok: false, error: "El código expiró (30 min). Solicita uno nuevo." }; }
+      if (r.codigo !== codigo.trim()) {
+        r.intentos += 1; store[u.id] = r;
+        try { localStorage.setItem(RECUPERACION_KEY, JSON.stringify(store)); } catch { /* noop */ }
+        if (r.intentos >= 5) { delete store[u.id]; try { localStorage.setItem(RECUPERACION_KEY, JSON.stringify(store)); } catch { /* noop */ } return { ok: false, error: "Código incorrecto demasiadas veces. Solicita un código nuevo." }; }
+        return { ok: false, error: "El código no es correcto." };
+      }
     }
     const faltas = validarPassFuerte(nueva);
     if (faltas.length) return { ok: false, error: "La nueva contraseña no cumple: " + faltas.join(", ").toLowerCase() + "." };
-    if (await verificarPass(nueva, u.password || "")) return { ok: false, error: "La nueva contraseña debe ser distinta a la actual." };
+    /* NOTA: ya NO exigimos que sea distinta a la anterior — si el hash llegó
+       corrupto desde la nube, esa comparación siempre fallaba y bloqueaba la
+       recuperación. La política de fuerza sigue aplicándose. */
     const hash = await hashPass(nueva);
     saveUsuario({ ...u, password: hash });
-    subirUsuarioYa({ ...u, password: hash }, nueva); /* la nueva clave también queda en supabase.auth */
+    /* Reparación total: la nueva clave también se escribe en supabase.auth
+       (si el admin configuró la service key) usando la service role, sin
+       necesitar la contraseña anterior. Si Auth tiene la clave más nueva,
+       respetamos esa y se re-sincroniza el hash local con ella. */
+    (async () => {
+      try {
+        const cfg = dbRef.current.config;
+        const url = (cfg.supabaseUrl || SUPABASE_DEFAULTS.url).trim();
+        const key = (cfg.supabaseKey || SUPABASE_DEFAULTS.key).trim();
+        const svc = (cfg.supabaseServiceKey || "").trim();
+        if (!url || !key || !svc || !u.email) return;
+        const { sbClient, forzarPassAuth, registrarPassCambio } = await import("./supabase");
+        const ac = sbClient(url, key, svc);
+        const ra = await forzarPassAuth(ac, u.email, nueva, { nombre: u.nombre, usuario: u.usuario, rol: u.rol });
+        if (ra.ok) registrarPassCambio(u.id);
+        setSyncInfo({ last: Date.now(), ok: ra.ok, msg: ra.ok ? `Contraseña de "${u.nombre}" restablecida en Supabase Auth ✔` : "Recuperación local OK, pero falló Supabase Auth: " + (ra.error || "") });
+      } catch { /* noop: queda reparada localmente y el autosync la sube */ }
+    })();
     delete store[u.id];
     try { localStorage.setItem(RECUPERACION_KEY, JSON.stringify(store)); } catch { /* noop */ }
+    /* Limpiar también cualquier bloqueo de intentos de login de esta cuenta */
+    try { const bl = JSON.parse(localStorage.getItem(BLOCK_KEY) || "{}"); delete bl[u.id]; localStorage.setItem(BLOCK_KEY, JSON.stringify(bl)); } catch { /* noop */ }
     /* Si quien recuperó su clave estaba conectado aquí, renovamos su sesión local */
     if (sesion?.id === u.id) { setSesion({ ...u, password: hash }); try { localStorage.setItem("jyg-sesion", JSON.stringify({ ...u, password: hash, verified: true })); } catch { /* noop */ } }
     return { ok: true };
