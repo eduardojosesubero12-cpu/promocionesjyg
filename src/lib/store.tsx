@@ -9,6 +9,7 @@ import type {
   HistorialTasa, MensajeLog, OcrDraft, PaqueteEscuela, Pago, ProduccionLog, Rol, Route,
   Sesion, TarjetaLog, Usuario,
 } from "./data";
+import { SUPABASE_DEFAULTS } from "./supabase";
 export type { Route, Rol };
 
 interface DB extends CRMData {}
@@ -168,7 +169,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
      la carga inicial ni al aplicar datos que llegaron de la nube. */
   useEffect(() => {
     if (!cloudReady.current || applyingRemote.current) return;
-    if (!db.config.autoSyncCloud || !db.config.supabaseUrl || !db.config.supabaseKey) return;
+    if (!db.config.autoSyncCloud) return;
     const t = setTimeout(() => { void syncToCloud(); }, 600);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -299,12 +300,16 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   /* Supabase (carga perezosa del SDK) */
   const clienteSb = useCallback(async (urlArg?: string, keyArg?: string) => {
-    const url = urlArg || dbRef.current.config.supabaseUrl;
-    const key = keyArg || dbRef.current.config.supabaseKey;
+    const url = (urlArg || dbRef.current.config.supabaseUrl || SUPABASE_DEFAULTS.url).trim();
+    const key = (keyArg || dbRef.current.config.supabaseKey || SUPABASE_DEFAULTS.key).trim();
     if (!url || !key) return null;
+    /* Si el usuario no configuró credenciales propias, usamos las del proyecto (.env) */
+    if (url !== dbRef.current.config.supabaseUrl || key !== dbRef.current.config.supabaseKey) {
+      mutate((d) => ({ ...d, config: { ...d.config, supabaseUrl: url, supabaseKey: key } }));
+    }
     const { sbClient } = await import("./supabase");
     return sbClient(url, key);
-  }, []);
+  }, [mutate]);
   const testCloud = useCallback(async (urlArg?: string, keyArg?: string) => {
     const client = await clienteSb(urlArg, keyArg);
     if (!client) throw new Error("Faltan la URL del proyecto y la anon key de Supabase");
@@ -385,24 +390,28 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     let cancelado = false;
     (async () => {
-      const cfg = dbRef.current.config;
-      if (cfg.supabaseUrl && cfg.supabaseKey) {
-        try {
-          const client = await clienteSb();
-          if (client) {
-            const { descargarTodo, rowsToDb } = await import("./supabase");
-            const rows = await descargarTodo(client);
-            if (!cancelado) {
+      try {
+        const client = await clienteSb();
+        if (client) {
+          const { descargarTodo, rowsToDb } = await import("./supabase");
+          const rows = await descargarTodo(client);
+          const nubeTieneDatos = Object.values(rows).some((v) => Array.isArray(v) && v.length > 0);
+          if (!cancelado) {
+            if (nubeTieneDatos) {
               applyingRemote.current = true;
               aplicarNube(rowsToDb(rows, dbRef.current));
               setSyncInfo({ last: Date.now(), ok: true, msg: "Datos leídos de Supabase al iniciar" });
               setTimeout(() => { applyingRemote.current = false; }, 800);
+            } else {
+              /* Nube totalmente vacía → publicar la base local por primera vez */
+              cloudReady.current = true;
+              await syncToCloud();
             }
           }
-        } catch {
-          /* Nube vacía o sin tablas → publicar la base local por primera vez */
-          if (!cancelado) await syncToCloud();
         }
+      } catch {
+        /* Error de red o esquema: dejar la base local visible y reintentar subida */
+        if (!cancelado) { cloudReady.current = true; await syncToCloud(); }
       }
       if (!cancelado) cloudReady.current = true;
     })();
