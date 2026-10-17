@@ -60,6 +60,8 @@ interface Ctx {
   user: Usuario; can: (r: Route) => boolean; setCurrentUser: (id: string) => void;
   sesion: Usuario | null;
   login: (email: string, password: string) => Promise<{ ok: boolean; error?: string }>;
+  /* Progreso de la carga inicial de usuarios desde la nube (pantalla de login) */
+  loginBoot: { listo: boolean; cargando: boolean; motivo?: string };
   logout: () => void;
   cambiarMiPass: (actual: string, nueva: string) => Promise<{ ok: boolean; error?: string }>;
   solicitarRecuperacion: (correo: string) => Promise<{ ok: boolean; error?: string; codigo?: string }>;
@@ -143,6 +145,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       return null;
     } catch { return null; }
   });
+  /* Estado visible de la pantalla de login: progreso de carga inicial + aviso
+     cuando el correo no existe en la nube todavía (para no mostrar un falso
+     "credenciales incorrectas" mientras sincroniza). */
+  const [loginBoot, setLoginBoot] = useState<{ listo: boolean; cargando: boolean; motivo?: string }>({ listo: false, cargando: true });
   const [syncInfo, setSyncInfo] = useState<{ last: number; ok: boolean; msg: string } | null>(null);
   const [syncing, setSyncing] = useState(false);
   const confirmResolve = useRef<((v: boolean) => void) | null>(null);
@@ -326,20 +332,35 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     /* Espera brevemente a que termine la carga inicial desde Supabase para
        validar contra los usuarios reales de la nube (evita falsos
        "credenciales incorrectas" al abrir el CRM recién desplegado). */
+    setLoginBoot((b) => ({ ...b, cargando: true }));
     for (let i = 0; i < 40 && !cloudReady.current; i++) await new Promise((r) => setTimeout(r, 100));
+    setLoginBoot({ listo: cloudReady.current, cargando: false });
     const lista = dbRef.current.usuarios.length > 0 ? dbRef.current.usuarios : SEED_USUARIOS;
     const correo = email.trim().toLowerCase();
-    /* Acepta correo o nombre de usuario */
-    const u = lista.find((x) => (x.email || "").toLowerCase() === correo || (x.usuario || "").toLowerCase() === correo);
-    if (!u) return { ok: false, error: "No existe un usuario con ese correo." };
+    /* Acepta correo, nombre de usuario o alias corto ("admin" ≈ admin@jyg.com.ve) */
+    const u =
+      lista.find((x) => (x.email || "").toLowerCase() === correo || (x.usuario || "").toLowerCase() === correo) ||
+      lista.find((x) => {
+        const dom = (x.email || "").split("@")[1] || "jyg.com.ve";
+        return (x.usuario || "").toLowerCase() === `${correo}@${dom}`;
+      });
+    if (!u) {
+      return {
+        ok: false,
+        error: cloudReady.current
+          ? "No existe un usuario con ese correo o usuario. Revisa la escritura o pídele al administrador que te registre."
+          : "Todavía no logramos leer los usuarios desde la nube. Verifica tu conexión e inténtalo de nuevo en unos segundos.",
+      };
+    }
     if (!u.activo) return { ok: false, error: "Este usuario está desactivado. Contacta al administrador." };
     /* BLOQUEO POR INTENTOS: tras 5 fallas seguidas se espera 1 minuto (por cuenta) */
     try {
       const bl = JSON.parse(localStorage.getItem(BLOCK_KEY) || "{}");
       const b = bl[u.id];
       if (b && b.hasta > Date.now()) {
-        const mins = Math.ceil((b.hasta - Date.now()) / 60000);
-        return { ok: false, error: `Demasiados intentos fallidos. Vuelve a intentar en ${mins} minuto(s).` };
+        const seg = Math.ceil((b.hasta - Date.now()) / 1000);
+        const t = seg > 60 ? `${Math.ceil(seg / 60)} minuto(s)` : `${seg} segundo(s)`;
+        return { ok: false, error: `Demasiados intentos fallidos. Vuelve a intentar en ${t}.` };
       }
     } catch { /* noop */ }
     /* MODO AUTOMÁTICO (Supabase Auth activo): la fuente de verdad es el
@@ -384,16 +405,18 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       }
     }
     if (!valida) {
-      /* registrar intento fallido */
+      /* registrar intento fallido + avisar cuántos quedan antes del bloqueo */
+      let aviso = "";
       try {
         const bl = JSON.parse(localStorage.getItem(BLOCK_KEY) || "{}");
         const b = bl[u.id] || { n: 0, hasta: 0 };
         b.n += 1;
-        if (b.n >= 5) { b.hasta = Date.now() + 60 * 1000; b.n = 0; }
+        if (b.n >= 5) { b.hasta = Date.now() + 60 * 1000; b.n = 0; aviso = " Se bloqueará esta cuenta por 1 minuto tras el próximo intento."; }
+        else if (b.n === 4) aviso = " Te queda 1 intento antes de un bloqueo temporal de 1 minuto.";
         bl[u.id] = b;
         localStorage.setItem(BLOCK_KEY, JSON.stringify(bl));
       } catch { /* noop */ }
-      return { ok: false, error: "La contraseña es incorrecta." };
+      return { ok: false, error: "La contraseña es incorrecta." + aviso };
     }
     /* éxito → limpiar contador de bloqueos */
     try { const bl = JSON.parse(localStorage.getItem(BLOCK_KEY) || "{}"); delete bl[u.id]; localStorage.setItem(BLOCK_KEY, JSON.stringify(bl)); } catch { /* noop */ }
@@ -831,7 +854,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     db, route, param, setParam, setRoute,
     tasa, tasaLoading, refreshTasa,
     ocrOpen, setOcrOpen, ocrDraft, setOcrDraft,
-    user, can, setCurrentUser, sesion, login, logout, cambiarMiPass, resetPassAdmin, solicitarRecuperacion, restablecerPass, setRolPermisos, setRolActivo,
+    user, can, setCurrentUser, sesion, login, logout, loginBoot, cambiarMiPass, resetPassAdmin, solicitarRecuperacion, restablecerPass, setRolPermisos, setRolActivo,
     confirm, confirmState, resolveConfirm, success, successState, closeSuccess, toast, toasts,
     saveEscuela, deleteEscuela, saveDocente, deleteDocente,
     saveEstudiante, deleteEstudiante, addPago, deletePago, setPedidoEstado, saveCodigos,
