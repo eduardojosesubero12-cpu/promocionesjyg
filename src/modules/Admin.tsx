@@ -909,7 +909,14 @@ export function Integraciones() {
        actuales del equipo viajan en texto plano por HTTPS hacia Supabase;
        el servidor aplica salt + bcrypt y aísla el hash en auth.users.
        Luego la tabla espejo "usuarios" queda SIN secretos en la nube. */
-    if (sbSvc.trim()) void sincronizarAuthAhora(true);
+    if (sbSvc.trim()) {
+      /* Verificar la service role ANTES de sincronizar: si no es válida,
+         avisar con un solo mensaje claro en vez del error repetido por
+         usuario («This endpoint requires a valid Bearer token»). */
+      const ok = await verificarSvc();
+      if (ok) void sincronizarAuthAhora(true);
+      else toast("Credenciales guardadas, PERO la service role no es válida — revisa el diagnóstico en pantalla.", "warn");
+    }
   };
   /* Sincronización masiva local → Supabase Auth (crea/actualiza usuarios
      reales y limpia los secretos del espejo). Reutilizable desde cualquier
@@ -932,6 +939,26 @@ export function Integraciones() {
       return msg;
     }
   };
+  /* Verificación rápida de la service role ANTES de sincronizar/guardar:
+     si el token no es válido, Supabase responde «This endpoint requires a
+     valid Bearer token» SOLO al tocar auth/v1/admin/* — nunca al leer tablas.
+     Detectarlo aquí evita el mensaje repetido por cada usuario. */
+  const [svcEstado, setSvcEstado] = useState<"idle" | "busy" | "ok" | "fail">("idle");
+  const [svcMsg, setSvcMsg] = useState("");
+  const verificarSvc = async (): Promise<boolean> => {
+    if (!sbSvc.trim()) { setSvcEstado("idle"); setSvcMsg(""); return false; }
+    setSvcEstado("busy");
+    try {
+      const { sbClient, diagnosticarServiceRole } = await import("../lib/supabase");
+      const err = await diagnosticarServiceRole(sbClient(sbUrl.trim(), sbKey.trim(), sbSvc.trim()));
+      if (err) { setSvcEstado("fail"); setSvcMsg(err); return false; }
+      setSvcEstado("ok"); setSvcMsg("Service role válida ✓ — puede crear/actualizar usuarios reales en Supabase Auth.");
+      return true;
+    } catch (e: any) {
+      setSvcEstado("fail"); setSvcMsg("No se pudo verificar: " + (e?.message || "desconocido"));
+      return false;
+    }
+  };
   const [syncAuthBusy, setSyncAuthBusy] = useState(false);
   const [syncAuthResumen, setSyncAuthResumen] = useState("");
   const [verRls, setVerRls] = useState(false);
@@ -939,6 +966,14 @@ export function Integraciones() {
   const [rlsEstricto, setRlsEstricto] = useState(!!db.config.rlsEstricto);
   const ejecutarSyncAuth = async () => {
     setSyncAuthBusy(true);
+    /* Verificar la service role ANTES de recorrer los usuarios: si el token
+       no es válido, abortar con UN mensaje claro (no N errores repetidos). */
+    const okSvc = await verificarSvc();
+    if (!okSvc) {
+      setSyncAuthResumen("⛔ Service role NO válida — corrígela y vuelve a intentar.");
+      setSyncAuthBusy(false);
+      return;
+    }
     setSyncAuthResumen(await sincronizarAuthAhora(true));
     setSyncAuthBusy(false);
   };
@@ -1048,9 +1083,25 @@ export function Integraciones() {
               </Field>
               <p className="mt-1 mb-0" style={{ fontSize: 11.5, color: "var(--ink-soft)" }}>
                 {sbSvc.trim()
-                  ? <><ShieldCheck size={12} style={{ verticalAlign: -2, color: "var(--ok)" }} /> Modo Automático ACTIVO: el CRM solo envía la contraseña en texto plano por HTTPS; Supabase la intercepta, le aplica <b>salt + bcrypt</b> y almacena el hash aislado en su esquema interno <code>auth.users</code>. Los miembros aparecen en Dashboard → Authentication → Users y la tabla espejo queda <b>sin secretos</b>.</>
+                  ? <><ShieldCheck size={12} style={{ verticalAlign: -2, color: svcEstado === "fail" ? "var(--err)" : "var(--ok)" }} /> Modo Automático ACTIVO: el CRM solo envía la contraseña en texto plano por HTTPS; Supabase la intercepta, le aplica <b>salt + bcrypt</b> y almacena el hash aislado en su esquema interno <code>auth.users</code>. Los miembros aparecen en Dashboard → Authentication → Users y la tabla espejo queda <b>sin secretos</b>.</>
                   : <>Sin esta clave el CRM usa el esquema local (tabla usuarios). Para activarlo: Supabase → Project Settings → API → <b>service_role</b> (secret). Es la única credencial que puede crear/eliminar usuarios de Auth — guárdala solo aquí, nunca la compartas ni la subas a GitHub.</>}
               </p>
+              {/* Botón de verificación + diagnóstico claro de la service role */}
+              {sbSvc.trim() && (
+                <div className="d-flex gap-2 align-items-center mt-2 flex-wrap">
+                  <button className="btn btn-sm btn-soft" onClick={() => void verificarSvc()} disabled={svcEstado === "busy"}>
+                    <ShieldCheck size={13} className={svcEstado === "busy" ? "spin" : ""} />
+                    {svcEstado === "busy" ? "Verificando…" : "Verificar service role"}
+                  </button>
+                  {svcEstado === "ok" && <Badge tone="green">Válida ✓</Badge>}
+                  {svcEstado === "fail" && <Badge tone="red">No válida ✗</Badge>}
+                </div>
+              )}
+              {svcMsg && (
+                <p className="mt-2 mb-0 p-2 rounded" style={{ fontSize: 11.5, background: svcEstado === "fail" ? "rgba(239,68,68,.08)" : "rgba(16,185,129,.07)", border: `1px solid ${svcEstado === "fail" ? "rgba(239,68,68,.3)" : "rgba(16,185,129,.25)"}`, color: "var(--ink)" }}>
+                  {svcMsg}
+                </p>
+              )}
             </div>
             {sbSvc.trim() && (
               <div className="mt-3 p-2 rounded" style={{ background: "rgba(16,185,129,.07)", border: "1px solid rgba(16,185,129,.25)" }}>
@@ -1061,6 +1112,11 @@ export function Integraciones() {
                   <span style={{ fontSize: 11.5, color: "var(--ink-soft)" }}>Crea/actualiza los usuarios reales y limpia los hashes del espejo público.</span>
                 </div>
                 {syncAuthResumen && <p className="mt-2 mb-0" style={{ fontSize: 11.5, fontFamily: "ui-monospace, monospace", color: "var(--ink)" }}>{syncAuthResumen}</p>}
+                {svcEstado === "fail" && syncAuthResumen.startsWith("⛔") && (
+                  <p className="mt-2 mb-0" style={{ fontSize: 11.5, color: "var(--err)" }}>
+                    No se creó/actualizó ningún usuario: Supabase rechazó la credencial. Corrígela arriba y vuelve a pulsar Sincronizar.
+                  </p>
+                )}
               </div>
             )}
 
