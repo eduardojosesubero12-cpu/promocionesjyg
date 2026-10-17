@@ -7,6 +7,7 @@ import { Escuelas, Docentes, Estudiantes, Clientes, Mensajes } from "./modules/C
 import Paquetes from "./modules/Paquetes";
 import { Agenda, Produccion, EtiquetasQRPage, OcrModal, OcrPage, Facturas } from "./modules/Operaciones";
 import { Reportes, Usuarios, Configuracion, Integraciones } from "./modules/Admin";
+import Login from "./modules/Login";
 
 const ROUTES: Record<Route, React.ComponentType> = {
   dashboard: Dashboard, clientes: Clientes, escuelas: Escuelas, docentes: Docentes,
@@ -48,8 +49,10 @@ class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { err
   }
 }
 
-/* Gate de acceso: inicio automático como Administrador */
+/* Gate de acceso: sin sesión verificada no se muestra el CRM — solo la pantalla de Login */
 function Gate() {
+  const { sesion } = useApp();
+  if (!sesion) return <Login />;
   return (
     <>
       <Shell>

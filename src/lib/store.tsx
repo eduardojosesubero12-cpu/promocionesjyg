@@ -118,12 +118,17 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [sesion, setSesion] = useState<Usuario | null>(() => {
     try {
       const raw = localStorage.getItem("jyg-sesion");
-      if (raw) return JSON.parse(raw) as Usuario;
-      // Si no hay sesión, crear automáticamente la del administrador
-      const admin = dbRef.current?.usuarios.find(u => u.rol === 'admin') || dbRef.current?.usuarios[0];
-      if (admin) {
-        localStorage.setItem("jyg-sesion", JSON.stringify(admin));
-        return admin;
+      /* SEGURIDAD: solo se reanuda una sesión guardada con el flag "verified"
+         (seteada tras validar correo + contraseña en login()). Así nadie entra
+         al CRM sin autenticarse — ni siquiera con la sesión del admin en caché. */
+      if (raw) {
+        const s = JSON.parse(raw) as Usuario & { verified?: boolean };
+        if (s?.verified && s.id) {
+          const actual = dbRef.current?.usuarios.find((u) => u.id === s.id);
+          if (actual && actual.activo) return actual;
+          return null; // usuario eliminado o desactivado → forzar login
+        }
+        localStorage.removeItem("jyg-sesion");
       }
       return null;
     } catch { return null; }
@@ -254,7 +259,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setSesion(u);
     setDb((d) => ({ ...d, currentUserId: u.id }));
     setRouteState("dashboard");
-    try { localStorage.setItem("jyg-sesion", JSON.stringify(u)); } catch { /* noop */ }
+    /* Flag "verified": solo se reanuda automáticamente si la contraseña fue validada aquí */
+    try { localStorage.setItem("jyg-sesion", JSON.stringify({ ...u, verified: true })); } catch { /* noop */ }
     return { ok: true };
   }, [mutate]);
   const logout = useCallback(() => {
