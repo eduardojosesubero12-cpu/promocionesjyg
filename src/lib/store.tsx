@@ -62,6 +62,8 @@ interface Ctx {
   login: (email: string, password: string) => Promise<{ ok: boolean; error?: string }>;
   logout: () => void;
   cambiarMiPass: (actual: string, nueva: string) => Promise<{ ok: boolean; error?: string }>;
+  solicitarRecuperacion: (correo: string) => Promise<{ ok: boolean; error?: string; codigo?: string }>;
+  restablecerPass: (correo: string, codigo: string, nueva: string) => Promise<{ ok: boolean; error?: string }>;
   resetPassAdmin: (userId: string, nueva: string) => Promise<{ ok: boolean; error?: string }>;
   setRolPermisos: (rol: Rol, rutas: string[]) => void; setRolActivo: (rol: Rol, activo: boolean) => void;
   confirm: (c: ConfirmState) => Promise<boolean>; confirmState: ConfirmState | null; resolveConfirm: (v: boolean) => void;
@@ -379,6 +381,64 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     return { ok: true };
   }, [sesion, saveUsuario]);
 
+  /* ---------- Recuperación de contraseña ("¿Olvidaste tu contraseña?") ----------
+     Como el CRM no tiene servidor propio ni correo transaccional, el flujo es:
+     1. solicitarRecuperacion genera un CÓDIGO TEMPORAL de 6 dígitos (expira en
+        30 min, máx. 5 intentos por cuenta/día) que se muestra UNA sola vez al
+        solicitante. Se entrega por canal seguro (WhatsApp/teléfono) o se usa
+        directamente para definir la clave nueva.
+     2. restablecerPass valida correo + código + política de seguridad y guarda
+        el hash nuevo en Supabase AL INSTANTE (saveUsuario).
+     El administrador además puede asignar claves desde Administración → 🔑. */
+  const RECUPERACION_KEY = "jyg-recuperacion";
+  const generarCodigo = () => String(Math.floor(100000 + Math.random() * 900000));
+  const solicitarRecuperacion = useCallback(async (correo: string): Promise<{ ok: boolean; error?: string; codigo?: string }> => {
+    for (let i = 0; i < 40 && !cloudReady.current; i++) await new Promise((r) => setTimeout(r, 100));
+    const lista = dbRef.current.usuarios.length > 0 ? dbRef.current.usuarios : SEED_USUARIOS;
+    const c = correo.trim().toLowerCase();
+    const u = lista.find((x) => (x.email || "").toLowerCase() === c || (x.usuario || "").toLowerCase() === c);
+    /* Mensaje genérico: no revelamos si el correo existe (anti-enumeração) */
+    if (!u) return { ok: false, error: "Si el correo está registrado recibirás un código. Verifica que esté bien escrito o contacta al administrador." };
+    if (!u.activo) return { ok: false, error: "Este usuario está desactivado. Contacta al administrador." };
+    let store: Record<string, { codigo: string; expira: number; intentos: number }> = {};
+    try { store = JSON.parse(localStorage.getItem(RECUPERACION_KEY) || "{}"); } catch { /* noop */ }
+    const prev = store[u.id];
+    if (prev && prev.intentos >= 5 && prev.expira > Date.now()) {
+      return { ok: false, error: "Demasiadas solicitudes. Vuelve a intentar más tarde o pide ayuda al administrador." };
+    }
+    const codigo = generarCodigo();
+    store[u.id] = { codigo, expira: Date.now() + 30 * 60 * 1000, intentos: (prev?.intentos ?? 0) + 1 };
+    try { localStorage.setItem(RECUPERACION_KEY, JSON.stringify(store)); } catch { /* noop */ }
+    return { ok: true, codigo };
+  }, []);
+  const restablecerPass = useCallback(async (correo: string, codigo: string, nueva: string): Promise<{ ok: boolean; error?: string }> => {
+    const lista = dbRef.current.usuarios.length > 0 ? dbRef.current.usuarios : SEED_USUARIOS;
+    const c = correo.trim().toLowerCase();
+    const u = lista.find((x) => (x.email || "").toLowerCase() === c || (x.usuario || "").toLowerCase() === c);
+    if (!u) return { ok: false, error: "Usuario no reconocido." };
+    let store: Record<string, { codigo: string; expira: number; intentos: number }> = {};
+    try { store = JSON.parse(localStorage.getItem(RECUPERACION_KEY) || "{}"); } catch { /* noop */ }
+    const r = store[u.id];
+    if (!r) return { ok: false, error: "No hay una solicitud activa. Pide un código nuevo." };
+    if (r.expira < Date.now()) { delete store[u.id]; localStorage.setItem(RECUPERACION_KEY, JSON.stringify(store)); return { ok: false, error: "El código expiró (30 min). Solicita uno nuevo." }; }
+    if (r.codigo !== codigo.trim()) {
+      r.intentos += 1; store[u.id] = r;
+      try { localStorage.setItem(RECUPERACION_KEY, JSON.stringify(store)); } catch { /* noop */ }
+      if (r.intentos >= 5) { delete store[u.id]; return { ok: false, error: "Código incorrecto demasiadas veces. Solicita un código nuevo." }; }
+      return { ok: false, error: "El código no es correcto." };
+    }
+    const faltas = validarPassFuerte(nueva);
+    if (faltas.length) return { ok: false, error: "La nueva contraseña no cumple: " + faltas.join(", ").toLowerCase() + "." };
+    if (await verificarPass(nueva, u.password || "")) return { ok: false, error: "La nueva contraseña debe ser distinta a la actual." };
+    const hash = await hashPass(nueva);
+    saveUsuario({ ...u, password: hash });
+    delete store[u.id];
+    try { localStorage.setItem(RECUPERACION_KEY, JSON.stringify(store)); } catch { /* noop */ }
+    /* Si quien recuperó su clave estaba conectado aquí, renovamos su sesión local */
+    if (sesion?.id === u.id) { setSesion({ ...u, password: hash }); try { localStorage.setItem("jyg-sesion", JSON.stringify({ ...u, password: hash, verified: true })); } catch { /* noop */ } }
+    return { ok: true };
+  }, [saveUsuario, sesion]);
+
 
   const setConfig = useCallback((patch: Partial<Config>) => mutate((d) => ({ ...d, config: { ...d.config, ...patch } })), [mutate]);
   const deleteTasaHistorial = useCallback((id: string) => mutate((d) => ({ ...d, historialTasas: d.historialTasas.filter((x) => x.id !== id) })), [mutate]);
@@ -638,7 +698,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     db, route, param, setParam, setRoute,
     tasa, tasaLoading, refreshTasa,
     ocrOpen, setOcrOpen, ocrDraft, setOcrDraft,
-    user, can, setCurrentUser, sesion, login, logout, cambiarMiPass, resetPassAdmin, setRolPermisos, setRolActivo,
+    user, can, setCurrentUser, sesion, login, logout, cambiarMiPass, resetPassAdmin, solicitarRecuperacion, restablecerPass, setRolPermisos, setRolActivo,
     confirm, confirmState, resolveConfirm, success, successState, closeSuccess, toast, toasts,
     saveEscuela, deleteEscuela, saveDocente, deleteDocente,
     saveEstudiante, deleteEstudiante, addPago, deletePago, setPedidoEstado, saveCodigos,
