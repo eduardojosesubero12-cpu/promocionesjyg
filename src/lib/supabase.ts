@@ -150,8 +150,18 @@ async function columnasNoValidas(client: SupabaseClient, tabla: string): Promise
   return r;
 }
 
-/* Inserta quitando columnas inexistentes y satisfaciendo NOT NULLs ajenos al CRM. */
+const LOTE = 500; /* filas por petición: soporta miles de estudiantes sin agotar el cuerpo/timeout */
+
+/* Inserta en lotes, quitando columnas inexistentes y satisfaciendo NOT NULLs ajenos al CRM. */
 async function insertarSeguro(client: SupabaseClient, tabla: string, data: any[]): Promise<{ ok: boolean; error?: string }> {
+  for (let i = 0; i < data.length; i += LOTE) {
+    const r = await _insertarLote(client, tabla, data.slice(i, i + LOTE));
+    if (!r.ok) return r;
+  }
+  return { ok: true };
+}
+
+async function _insertarLote(client: SupabaseClient, tabla: string, data: any[]): Promise<{ ok: boolean; error?: string }> {
   let restante = data;
   let ultimoErr = "";
   for (let intento = 0; intento < 10 && restante.length > 0; intento++) {
@@ -208,8 +218,16 @@ export async function subirTodo(client: SupabaseClient, db: CRMData, onTabla?: (
       const invalidas = await columnasNoValidas(client, tabla);
       const mal = new Set(invalidas || []);
       const limpio = invalidas ? data.map((r) => Object.fromEntries(Object.entries(r).filter(([k]) => !mal.has(k)))) : data;
-      /* Copia de seguridad de lo que hay en la nube antes de reemplazarlo */
-      const prev = data.length > 0 ? (await client.from(tabla).select("*")).data || [] : [];
+      /* Copia de seguridad de lo que hay en la nube antes de reemplazarlo (paginada) */
+      let prev: any[] = [];
+      if (data.length > 0) {
+        for (let d = 0; ; d += 1000) {
+          const r = await client.from(tabla).select("*").range(d, d + 999);
+          if (r.error) throw new Error(r.error.message);
+          prev.push(...(r.data || []));
+          if ((r.data || []).length < 1000) break;
+        }
+      }
       const del = await client.from(tabla).delete().neq("id", "");
       if (del.error) throw new Error(del.error.message);
       if (limpio.length > 0) {
@@ -239,9 +257,17 @@ export async function subirTodo(client: SupabaseClient, db: CRMData, onTabla?: (
 export async function descargarTodo(client: SupabaseClient): Promise<Record<string, any[]>> {
   const rows: Record<string, any[]> = {};
   for (const { tabla } of DB_TABLES) {
-    const { data, error } = await client.from(tabla).select("*");
-    if (error) throw new Error(`${tabla}: ${error.message}`);
-    rows[tabla] = data || [];
+    /* Paginado de 1000 en 1000: PostgREST corta la respuesta sin "range",
+       así que sin esto solo bajarían los primeros 1000 registros por tabla. */
+    const todos: any[] = [];
+    for (let desde = 0; ; desde += 1000) {
+      const { data, error } = await client.from(tabla).select("*").range(desde, desde + 999);
+      if (error) throw new Error(`${tabla}: ${error.message}`);
+      const lote = data || [];
+      todos.push(...lote);
+      if (lote.length < 1000) break;
+    }
+    rows[tabla] = todos;
   }
   if ((rows.estudiantes?.length || 0) + (rows.escuelas?.length || 0) + (rows.configuracion?.length || 0) === 0)
     throw new Error("La base de datos en Supabase está vacía. Sube primero los datos del CRM.");
