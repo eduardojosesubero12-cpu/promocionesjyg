@@ -23,7 +23,9 @@ export const sbClient = (url?: string, key?: string, serviceKey?: string): Supab
      el SDK guarda el JWT en localStorage y lo auto-refresca, de modo que al
      recargar la página la sesión sigue viva. Con service role (operaciones de
      admin) NO se persiste nada: es una verificación puntual sin sesión propia. */
-  const svc = (serviceKey || "").trim();
+  /* Sanear la service key: quitar espacios/retornos accidentales al copiarla
+     (causa típica del error «requires a valid Bearer token»). */
+  const svc = (serviceKey || "").trim().replace(/\s+/g, "");
   return createClient(u, svc || (key || "").trim() || ENV_KEY, {
     auth: {
       persistSession: !svc,
@@ -461,14 +463,44 @@ export async function existeEnAuth(client: SupabaseClient, email: string): Promi
    Supabase la intercepta, aplica salt + bcrypt y guarda el hash
    AISLADO en su esquema interno auth.users. Nunca se sube un hash
    propio a la tabla pública "usuarios" cuando Auth está activo.
+
+   ⚠️ DIAGNÓSTICO PREVIO OBLIGATORIO: los endpoints de administración
+   (auth/v1/admin/*) exigen como Bearer UNA service_role key VÁLIDA para
+   ESTE proyecto. Si se llama con la anon key —o con una service key de
+   OTRO proyecto, caducada o mal copiada— Supabase responde
+   "This endpoint requires a valid Bearer token". Antes de recorrer los
+   usuarios se hace UNA sola verificación barata; si falla, se aborta con
+   UN mensaje claro (en vez de repetir el mismo error por cada usuario).
    ============================================================ */
 export type SyncAuthResultado = { creados: number; actualizados: number; omitidos: number; errores: string[] };
+
+/* Verifica que el cliente tenga REALMENTE permisos de administración
+   (service role válida). Devuelve null si todo está bien, o un mensaje
+   de error accionable explicando las causas más comunes. */
+export async function diagnosticarServiceRole(client: SupabaseClient): Promise<string | null> {
+  try {
+    const { error } = await client.auth.admin.listUsers({ page: 1, perPage: 1 });
+    if (!error) return null;
+    const msg = String(error.message || "").toLowerCase();
+    if (/bearer|invalid.*token|jwt/.test(msg)) {
+      return "La Service Role Key NO es válida para este proyecto (Supabase respondió: «requires a valid Bearer token»). Causas típicas: 1) pegaste la ANON key donde va la service key; 2) la service key es de OTRO proyecto o fue ROTADA (regenerada) en Supabase; 3) quedó un espacio al inicio o final al copiarla. Consíguela en Supabase → Project Settings → API → service_role (secret), pégala completa en Configuración y vuelve a guardar.";
+    }
+    return `Supabase rechazó la verificación de la service role: ${error.message}`;
+  } catch (e: any) {
+    return `No hay acceso a supabase.auth (service role): ${e?.message || e}`;
+  }
+}
+
 export async function sincronizarAuthMasivo(
   client: SupabaseClient,
   usuarios: Usuario[],
   opts: { limpiarEspejo?: boolean } = {},
 ): Promise<SyncAuthResultado> {
   const res: SyncAuthResultado = { creados: 0, actualizados: 0, omitidos: 0, errores: [] };
+  /* Un solo diagnóstico antes del bucle: si la service key no sirve, abortar
+     ya con mensaje claro (evita N errores repetidos del mismo tipo). */
+  const diag = await diagnosticarServiceRole(client);
+  if (diag) return { ...res, errores: [diag] };
   let lista: any[] = [];
   try {
     const { data } = await client.auth.admin.listUsers({ page: 1, perPage: 1000 });
