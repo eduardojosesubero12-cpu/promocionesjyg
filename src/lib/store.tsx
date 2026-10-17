@@ -381,28 +381,45 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
        en Vercel, con auto-refresh del token. */
     const ac = authClient();
     if (ac && u.email) {
-      let registrado = false;
-      try { const { existeEnAuth } = await import("./supabase"); registrado = await existeEnAuth(ac, u.email); } catch { /* sin acceso admin: se usa la capa local */ }
-      if (registrado) {
-        const sc = authSessionClient() || ac;
-        const r = await loginAuth(sc, u.email, password);
-        if (!r.ok) {
-          if (r.error === "incorrectas") return { ok: false, error: "La contraseña no coincide con la registrada en Supabase Auth. Recupérala con «¿Olvidaste tu contraseña?» o pide un restablecimiento al administrador." };
-          return { ok: false, error: r.error ? `No se pudo validar con Supabase Auth: ${r.error}` : "No se pudo validar con Supabase Auth." };
+      /* Si TODAVÍA existe un hash local válido (modo legacy / semilla), la
+         capa local tiene prioridad: Auth puede no conocer al usuario todavía
+         (p. ej. «Sincronizar equipo» falló por service role inválida) y eso
+         no debe bloquear una contraseña correcta. Al validar aquí, además
+         REPARAMOS Auth en segundo plano con la clave exacta, para que el
+         acceso por Auth funcione desde cualquier dispositivo. */
+      const seed = SEED_USUARIOS.find((s) => s.id === u.id || (s.email || "").toLowerCase() === correo);
+      let validaLocal = await verificarPass(password, u.password || "");
+      if (!validaLocal && seed) validaLocal = await verificarPass(password, seed.password || "");
+      if (validaLocal) {
+        (async () => {
+          try {
+            const { forzarPassAuth } = await import("./supabase");
+            await forzarPassAuth(ac, u.email, password, { nombre: u.nombre, usuario: u.usuario, rol: u.rol });
+          } catch { /* sin service key válida: la capa local sigue funcionando */ }
+        })();
+      } else {
+        let registrado = false;
+        try { const { existeEnAuth } = await import("./supabase"); registrado = await existeEnAuth(ac, u.email); } catch { /* sin acceso admin: se usa la capa local */ }
+        if (registrado) {
+          const sc = authSessionClient() || ac;
+          const r = await loginAuth(sc, u.email, password);
+          if (!r.ok) {
+            if (r.error === "incorrectas") return { ok: false, error: "La contraseña no coincide con la registrada en Supabase Auth. Recupérala con «¿Olvidaste tu contraseña?» o pide un restablecimiento al administrador." };
+            return { ok: false, error: r.error ? `No se pudo validar con Supabase Auth: ${r.error}` : "No se pudo validar con Supabase Auth." };
+          }
+          /* Auth confirmó la clave → reparamos el hash local si estaba corrupto/vacío */
+          if (!(await verificarPass(password, u.password || ""))) {
+            const reparado = await hashPass(password);
+            mutate((d) => ({ ...d, usuarios: d.usuarios.map((x) => (x.id === u.id ? { ...x, password: reparado } : x)) }));
+          }
+          try { const bl = JSON.parse(localStorage.getItem(BLOCK_KEY) || "{}"); delete bl[u.id]; localStorage.setItem(BLOCK_KEY, JSON.stringify(bl)); } catch { /* noop */ }
+          const listo: Usuario = { ...u, password: u.password || (await hashPass(password)) };
+          setSesion(listo);
+          setDb((d) => ({ ...d, currentUserId: listo.id }));
+          setRouteState("dashboard");
+          try { localStorage.setItem("jyg-sesion", JSON.stringify({ ...listo, verified: true })); } catch { /* noop */ }
+          return { ok: true };
         }
-        /* Auth confirmó la clave → reparamos el hash local si estaba corrupto */
-        const validaLocal = await verificarPass(password, u.password || "");
-        if (!validaLocal) {
-          const reparado = await hashPass(password);
-          mutate((d) => ({ ...d, usuarios: d.usuarios.map((x) => (x.id === u.id ? { ...x, password: reparado } : x)) }));
-        }
-        try { const bl = JSON.parse(localStorage.getItem(BLOCK_KEY) || "{}"); delete bl[u.id]; localStorage.setItem(BLOCK_KEY, JSON.stringify(bl)); } catch { /* noop */ }
-        const listo: Usuario = { ...u, password: u.password || (await hashPass(password)) };
-        setSesion(listo);
-        setDb((d) => ({ ...d, currentUserId: listo.id }));
-        setRouteState("dashboard");
-        try { localStorage.setItem("jyg-sesion", JSON.stringify({ ...listo, verified: true })); } catch { /* noop */ }
-        return { ok: true };
       }
     }
     /* CAPA LOCAL — hash en la tabla espejo "usuarios" (modo legacy). */

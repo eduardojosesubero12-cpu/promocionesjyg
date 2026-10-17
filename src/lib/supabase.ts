@@ -435,6 +435,29 @@ export async function loginAuth(client: SupabaseClient, email: string, password:
   }
 }
 
+/* Crear en Supabase Auth un usuario con la contraseña EXACTA del espejo
+   local (email_confirm: true → puede iniciar sesión de inmediato, sin pasar
+   por el correo de confirmación). Reservado para reparaciones puntuales;
+   la reparación automática del login usa forzarPassAuth (crea o actualiza). */
+export async function crearAuthUserConPass(
+  client: SupabaseClient,
+  u: Usuario,
+  passPlana: string,
+): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const { error } = await client.auth.admin.createUser({
+      email: u.email,
+      password: passPlana,
+      email_confirm: true,
+      user_metadata: { nombre: u.nombre, usuario: u.usuario, rol: u.rol },
+    });
+    if (error) return { ok: false, error: error.message };
+    return { ok: true };
+  } catch (e: any) {
+    return { ok: false, error: e?.message || "fallo de red" };
+  }
+}
+
 /* Cierre de sesión Auth al salir del CRM (elimina el JWT persistido). */
 export async function logoutAuth(client: SupabaseClient): Promise<void> {
   try { await client.auth.signOut(); } catch { /* noop */ }
