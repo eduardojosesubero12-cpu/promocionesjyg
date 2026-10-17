@@ -51,6 +51,21 @@ export async function verificarPass(pw: string, stored: string): Promise<boolean
   if (stored.startsWith("plain:")) return stored.slice(6) === pw;
   return (await hashPass(pw)) === stored;
 }
+
+/* ============================================================
+   POLÍTICA DE CONTRASEÑAS SEGURAS (módulo de gestión)
+   Reglas: mínimo 8 caracteres, una mayúscula, un número y
+   un símbolo. Devuelve la lista de reglas incumplidas.
+   ============================================================ */
+export const PASS_REGLAS = [
+  { label: "Mínimo 8 caracteres", test: (p: string) => p.length >= 8 },
+  { label: "Al menos una letra MAYÚSCULA", test: (p: string) => /[A-Z]/.test(p) },
+  { label: "Al menos un número", test: (p: string) => /\d/.test(p) },
+  { label: "Al menos un símbolo (!@#$%…)", test: (p: string) => /[^A-Za-z0-9]/.test(p) },
+];
+export function validarPassFuerte(pw: string): string[] {
+  return PASS_REGLAS.filter((r) => !r.test(pw)).map((r) => r.label);
+}
 export interface HistorialTasa { id: string; fecha: string; usd: number; euro: number; paralelo: number; fuente: "dolarapi" | "manual"; actualizado: number; }
 export interface PaqueteEscuelaArticulo { nombre: string; cantidad: number; }
 export interface PaqueteEscuela { id: string; escuelaId: string; nombre: string; tipoPaqueteId: string; precio: number; articulos: PaqueteEscuelaArticulo[]; nota: string; activo: boolean; creado: string; }

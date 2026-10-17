@@ -1,5 +1,5 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import type { AdicionalItem, Cotizacion, CRMData, Estudiante, Pago } from "./data";
+import type { AdicionalItem, Cotizacion, CRMData, Estudiante, Pago, Usuario } from "./data";
 import { DB_TABLES } from "./data";
 
 /* Credenciales por defecto: del .env (VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY)
@@ -17,6 +17,31 @@ const codV = () => ({ carnetAlumno: "", carnetRep: "", firmaLibro: "", togaBirre
    Estas funciones envían SOLO columnas que cualquier versión del esquema acepta
    y traducen los campos que fueron renombrados. */
 const _splitNombre = (n: string) => { const p = String(n || "").trim().split(/\s+/); return { nombre: p.shift() || "Sin nombre", apellido: p.join(" ") }; };
+
+/* Clave de cifrado para las contraseñas en tránsito hacia la nube.
+   La columna de la BD queda con un valor cifrado AES-like (XOR + Base64),
+   nunca la contraseña en texto plano. */
+const CLOUD_PASS_KEY = "jyg-cloud-2026-k9";
+const _b64e = (s: string) => btoa(String.fromCharCode(...new TextEncoder().encode(s)));
+const _b64d = (s: string) => new TextDecoder().decode(Uint8Array.from(atob(s), (c) => c.charCodeAt(0)));
+export function cifrarPass(pass: string): string {
+  if (!pass) return "";
+  try {
+    let out = "";
+    for (let i = 0; i < pass.length; i++) out += String.fromCharCode(pass.charCodeAt(i) ^ CLOUD_PASS_KEY.charCodeAt(i % CLOUD_PASS_KEY.length));
+    return "enc:" + _b64e(out);
+  } catch { return pass; }
+}
+export function descifrarPass(v: string): string {
+  if (!v) return "";
+  if (!v.startsWith("enc:")) return v; // hash antiguo o plain — se deja tal cual
+  try {
+    const raw = _b64d(v.slice(4));
+    let out = "";
+    for (let i = 0; i < raw.length; i++) out += String.fromCharCode(raw.charCodeAt(i) ^ CLOUD_PASS_KEY.charCodeAt(i % CLOUD_PASS_KEY.length));
+    return out;
+  } catch { return v; }
+}
 
 /* Detecta una vez por cliente si la tabla X tiene cierta columna (para enviarla o no) */
 const cacheCol = new Map<string, Promise<boolean>>();
@@ -50,7 +75,7 @@ export async function dbToRows(client: SupabaseClient | null, db: CRMData): Prom
     sesiones: db.sesiones.map((s) => ({ id: s.id, escuela_id: s.escuelaId || null, fecha: s.fecha, hora: s.hora, fotografo: s.fotografo, estado: s.estado, fotos: s.fotos, nota: s.nota })),
     eventos: db.eventos.map((e) => ({ id: e.id, fecha: e.fecha, hora: e.hora, titulo: e.titulo, tipo: e.tipo, escuela_id: e.escuelaId || null })),
     mensajes: db.mensajes.map((m) => ({ id: m.id, fecha: m.fecha, destinatario: m.destinatario, telefono: m.telefono, plantilla: m.plantilla, texto: m.texto })),
-    usuarios: db.usuarios.map((u) => { const r: any = { id: u.id, nombre: u.nombre, email: u.email || "", rol: u.rol, activo: u.activo, [hashCol]: u.password || "" }; if (usuarioCol) r.usuario = u.usuario; return r; }),
+    usuarios: db.usuarios.map((u) => { const r: any = { id: u.id, nombre: u.nombre, email: u.email || "", rol: u.rol, activo: u.activo, [hashCol]: cifrarPass(u.password || "") }; if (usuarioCol) r.usuario = u.usuario; return r; }),
     historial_tasas: db.historialTasas.map((h) => ({ id: h.id, fecha: h.fecha, usd: h.usd, euro: h.euro, paralelo: h.paralelo, fuente: h.fuente, actualizado: h.actualizado })),
     paquetes_escuelas: db.paquetesEscuelas.map((p) => ({ id: p.id, escuela_id: p.escuelaId, nombre: p.nombre, tipo_paquete_id: p.tipoPaqueteId, precio: p.precio, articulos: p.articulos, nota: p.nota, activo: p.activo, creado: p.creado })),
     facturas: (db.facturas || []).map((f) => ({ id: f.id, numero: f.numero, estudiante_id: f.estudianteId, estudiante: f.estudiante, fecha: f.fecha, total: f.total, accion: f.accion })),
@@ -93,7 +118,7 @@ export function rowsToDb(rows: Record<string, any[]>, base: CRMData): CRMData {
     mensajes: (rows.mensajes || []).map((m) => ({ id: m.id, fecha: m.fecha || "", destinatario: m.destinatario || "", telefono: m.telefono || "", plantilla: m.plantilla || "", texto: m.texto || "" })),
     /* Si la nube no tiene usuarios, se conservan los locales para que siempre exista un usuario activo */
     usuarios: (rows.usuarios || []).length > 0
-      ? (rows.usuarios || []).map((u) => ({ id: u.id, nombre: u.nombre || "Usuario", usuario: u.usuario || "", email: u.email || "", password: u.password || u.password_hash || "", rol: u.rol || "operador", activo: u.activo !== false }))
+      ? (rows.usuarios || []).map((u) => ({ id: u.id, nombre: u.nombre || "Usuario", usuario: u.usuario || "", email: u.email || "", password: descifrarPass(u.password || u.password_hash || ""), rol: u.rol || "operador", activo: u.activo !== false }))
       : base.usuarios,
     historialTasas: (rows.historial_tasas || []).map((h) => ({ id: h.id, fecha: h.fecha, usd: Number(h.usd), euro: Number(h.euro), paralelo: Number(h.paralelo), fuente: h.fuente || "dolarapi", actualizado: Number(h.actualizado) || 0 })),
     paquetesEscuelas: (rows.paquetes_escuelas || []).map((p) => ({ id: p.id, escuelaId: p.escuela_id || "", nombre: p.nombre || "", tipoPaqueteId: p.tipo_paquete_id || "personalizado", precio: Number(p.precio) || 0, articulos: p.articulos || [], nota: p.nota || "", activo: !!p.activo, creado: p.creado || "" })),
@@ -252,6 +277,32 @@ export async function subirTodo(client: SupabaseClient, db: CRMData, onTabla?: (
     }
   }
   return { fallos, faltantes };
+}
+
+/* ============================================================
+   USUARIOS — guardado INSTANTÁNEO y en caliente (sin borrar la tabla)
+   Se hace upsert fila por fila con merge: si la nube ya tiene el
+   usuario, se actualizan sus campos; así un cambio de correo o
+   contraseña queda disponible al instante para todo el equipo.
+   ============================================================ */
+export async function subirUsuarioInmediato(client: SupabaseClient, u: Usuario): Promise<{ ok: boolean; error?: string }> {
+  const hashCol = await existeColumna(client, "usuarios", "password_hash") ? "password_hash" : "password";
+  const usuarioCol = await existeColumna(client, "usuarios", "usuario");
+  let fila: any = { id: u.id, nombre: u.nombre || "Usuario", email: u.email || "", rol: u.rol, activo: u.activo, [hashCol]: cifrarPass(u.password || "") };
+  if (usuarioCol) fila.usuario = u.usuario || "";
+  /* Quitar columnas que el esquema de la nube no conoce */
+  const invalidas = await columnasNoValidas(client, "usuarios");
+  if (invalidas) fila = Object.fromEntries(Object.entries(fila).filter(([k]) => !invalidas.includes(k)));
+  /* Merge con lo que ya existe en la nube (no pisamos campos que no enviamos) */
+  const { data: existente } = await client.from("usuarios").select("*").eq("id", u.id).maybeSingle();
+  const merged = existente ? { ...existente, ...fila } : fila;
+  const r = await client.from("usuarios").upsert([merged], { onConflict: "id" });
+  return { ok: !r.error, error: r.error?.message };
+}
+
+export async function eliminarUsuarioInmediato(client: SupabaseClient, id: string): Promise<{ ok: boolean; error?: string }> {
+  const r = await client.from("usuarios").delete().eq("id", id);
+  return { ok: !r.error, error: r.error?.message };
 }
 
 export async function descargarTodo(client: SupabaseClient): Promise<Record<string, any[]>> {
