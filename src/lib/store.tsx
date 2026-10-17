@@ -9,7 +9,7 @@ import type {
   HistorialTasa, MensajeLog, OcrDraft, PaqueteEscuela, Pago, ProduccionLog, Rol, Route,
   Sesion, TarjetaLog, Usuario,
 } from "./data";
-import { SUPABASE_DEFAULTS, sbClient, loginAuth } from "./supabase";
+import { SUPABASE_DEFAULTS, sbClient, loginAuth, logoutAuth } from "./supabase";
 export type { Route, Rol };
 
 interface DB extends CRMData {}
@@ -327,6 +327,16 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     return sbClient(url, key, svc);
   }, []);
 
+  /* Cliente de SESIÓN Auth: usa la anon key (nunca la service role) para que
+     el JWT del usuario se emita y persista correctamente en producción. */
+  const authSessionClient = useCallback(() => {
+    const cfg = dbRef.current.config;
+    const url = (cfg.supabaseUrl || SUPABASE_DEFAULTS.url).trim();
+    const key = (cfg.supabaseKey || SUPABASE_DEFAULTS.key).trim();
+    if (!url || !key) return null;
+    return sbClient(url, key);
+  }, []);
+
   /* Inicio de sesión (correo + contraseña) */
   const login = useCallback(async (email: string, password: string): Promise<{ ok: boolean; error?: string }> => {
     /* Espera brevemente a que termine la carga inicial desde Supabase para
@@ -365,13 +375,17 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     } catch { /* noop */ }
     /* MODO AUTOMÁTICO (Supabase Auth activo): la fuente de verdad es el
        esquema interno auth.users — Supabase valida bcrypt+salt en servidor y
-       emite JWT. La tabla espejo NO contiene contraseñas en este modo. */
+       emite JWT. La tabla espejo NO contiene contraseñas en este modo.
+       El signIn se hace con un cliente ANON persistente: así el JWT queda
+       guardado en localStorage (por proyecto) y la sesión sobrevive recargas
+       en Vercel, con auto-refresh del token. */
     const ac = authClient();
     if (ac && u.email) {
       let registrado = false;
       try { const { existeEnAuth } = await import("./supabase"); registrado = await existeEnAuth(ac, u.email); } catch { /* sin acceso admin: se usa la capa local */ }
       if (registrado) {
-        const r = await loginAuth(ac, u.email, password);
+        const sc = authSessionClient() || ac;
+        const r = await loginAuth(sc, u.email, password);
         if (!r.ok) {
           if (r.error === "incorrectas") return { ok: false, error: "La contraseña no coincide con la registrada en Supabase Auth. Recupérala con «¿Olvidaste tu contraseña?» o pide un restablecimiento al administrador." };
           return { ok: false, error: r.error ? `No se pudo validar con Supabase Auth: ${r.error}` : "No se pudo validar con Supabase Auth." };
@@ -454,11 +468,17 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     /* Flag "verified": solo se reanuda automáticamente si la contraseña fue validada aquí */
     try { localStorage.setItem("jyg-sesion", JSON.stringify({ ...u, verified: true })); } catch { /* noop */ }
     return { ok: true };
-  }, [mutate, authClient]);
+  }, [mutate, authClient, authSessionClient]);
   const logout = useCallback(() => {
     setSesion(null);
     try { localStorage.removeItem("jyg-sesion"); } catch { /* noop */ }
-  }, []);
+    /* Cerrar también la sesión de Supabase Auth (elimina el JWT persistido y
+       detiene el auto-refresh): nadie queda con acceso residual en el equipo. */
+    try {
+      const sc = authSessionClient();
+      if (sc) void logoutAuth(sc);
+    } catch { /* noop */ }
+  }, [authSessionClient]);
 
   /* ---------- Gestión segura de contraseñas ----------
      cambiarMiPass: cada miembro cambia SU propia contraseña validando la actual.

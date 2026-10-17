@@ -43,6 +43,41 @@ Las claves son **secretos** y no deben vivir en el repositorio. Se configuran de
 
 Ambas quedan guardadas en el navegador (y en Supabase si sincronizas).
 
+## ☁️ Desplegar en Vercel y conectar el login con Supabase
+
+Este CRM es **Vite + React** (no Next.js), por lo que las variables de entorno
+se leen desde `import.meta.env`. El cliente unificado está en
+`src/lib/supabase.ts` (`sbClient`) con `persistSession: true` y
+`autoRefreshToken: true`: la sesión iniciada con correo/contraseña **sobrevive
+a recargas en producción** y el JWT se refresca solo. La sesión Auth se guarda
+bajo una clave aislada por proyecto (`sb-<ref>-crm-auth`), para que
+`promocionesjyg.vercel.app` y `localhost:3000` nunca compartan tokens.
+
+### Paso 1 — Supabase → Authentication → URL Configuration
+- **Site URL:** `https://promocionesjyg.vercel.app`
+- **Redirect URLs:** añade `https://promocionesjyg.vercel.app/**` y `http://localhost:3000/**`
+
+### Paso 2 — Vercel → Project `promocionesjyg` → Settings → Environment Variables
+Agrega (categoría *Production*, *Preview* y *Development*) y **Redeploy**:
+
+| Variable (Vercel) | Equivale a | Valor |
+|---|---|---|
+| `NEXT_PUBLIC_SUPABASE_URL` | `VITE_SUPABASE_URL` | `https://kdzofrxquzhtixzjtgmx.supabase.co` |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | `VITE_SUPABASE_ANON_KEY` | tu anon/public key del proyecto |
+
+> El código acepta **ambos prefijos** (`VITE_*` o `NEXT_PUBLIC_*`), así que
+> puedes usar cualquiera de los dos nombres sin tocar el fuente.
+
+En local, copia `.env.example` a `.env` con `VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY`.
+
+### Paso 3 — Verificar el login en producción
+1. Abre `https://promocionesjyg.vercel.app` → inicia sesión con correo y contraseña.
+2. El login valida en **dos capas**: Supabase Auth (bcrypt + JWT en servidor) y la tabla espejo `usuarios` (equivalente al chequeo contra `team_members`): si el miembro no existe o `activo = false`, el acceso se rechaza con mensaje claro y sesión cerrada.
+3. Recarga la página (F5): debes permanecer dentro del CRM (sesión persistida + reanudada con flag `verified`).
+4. Al pulsar **Salir**, el JWT de Auth se elimina (`signOut`).
+
+⚠️ Nunca subas la `service_role` key a las variables públicas de Vercel: esa clave solo se pega en **Integraciones** (modo automático) y permanece en el navegador del administrador.
+
 ## 📤 Publicar en GitHub
 
 El proyecto incluye scripts que publican con un **historial limpio** (sin commits que contengan secretos):

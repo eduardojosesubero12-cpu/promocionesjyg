@@ -2,13 +2,37 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import type { AdicionalItem, Cotizacion, CRMData, Estudiante, Pago, Usuario } from "./data";
 import { DB_TABLES } from "./data";
 
-/* Credenciales por defecto: del .env (VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY)
-   y, si no están, las del proyecto del equipo. Así la conexión nunca queda vacía. */
-const ENV_URL = (import.meta as any).env?.VITE_SUPABASE_URL || "https://kdzofrxquzhtixzjtgmx.supabase.co";
-const ENV_KEY = (import.meta as any).env?.VITE_SUPABASE_ANON_KEY || "sb_publishable_ibQlrVHQi9oqKd5iw3X3CA_fpSMjzFq";
+/* Credenciales por defecto: del .env de build (VITE_* o NEXT_PUBLIC_*, ambos
+   soportados para que el mismo cliente funcione en Vite local y en Vercel con
+   variables NEXT_PUBLIC_SUPABASE_URL / NEXT_PUBLIC_SUPABASE_ANON_KEY),
+   y si no están, las del proyecto del equipo. Así la conexión nunca queda vacía. */
+const _env = (k: string): string => {
+  try { return String((import.meta as any).env?.[k] || "").trim(); } catch { return ""; }
+};
+const ENV_URL = _env("VITE_SUPABASE_URL") || _env("NEXT_PUBLIC_SUPABASE_URL") || "https://kdzofrxquzhtixzjtgmx.supabase.co";
+const ENV_KEY = _env("VITE_SUPABASE_ANON_KEY") || _env("NEXT_PUBLIC_SUPABASE_ANON_KEY") || "sb_publishable_ibQlrVHQi9oqKd5iw3X3CA_fpSMjzFq";
 export const SUPABASE_DEFAULTS = { url: ENV_URL, key: ENV_KEY };
-export const sbClient = (url?: string, key?: string, serviceKey?: string): SupabaseClient =>
-  createClient(url?.trim() || ENV_URL, (serviceKey?.trim() || key)?.trim() || ENV_KEY, { auth: { persistSession: false, autoRefreshToken: false } });
+
+/* Clave de almacenamiento de sesión Auth AISLADA por proyecto Supabase:
+   así dos despliegues (producción Vercel + localhost) nunca comparten JWT. */
+const storageKeyPara = (url: string) => `sb-${String(url || "").replace(/^https?:\/\//, "").split(".")[0]}-crm-auth`;
+
+export const sbClient = (url?: string, key?: string, serviceKey?: string): SupabaseClient => {
+  const u = url?.trim() || ENV_URL;
+  /* PERSISTENCIA DE SESIÓN EN PRODUCCIÓN (Vercel): cuando se usa la anon key,
+     el SDK guarda el JWT en localStorage y lo auto-refresca, de modo que al
+     recargar la página la sesión sigue viva. Con service role (operaciones de
+     admin) NO se persiste nada: es una verificación puntual sin sesión propia. */
+  const svc = (serviceKey || "").trim();
+  return createClient(u, svc || (key || "").trim() || ENV_KEY, {
+    auth: {
+      persistSession: !svc,
+      autoRefreshToken: !svc,
+      detectSessionInUrl: false,
+      storageKey: storageKeyPara(u),
+    },
+  });
+};
 
 const codV = () => ({ carnetAlumno: "", carnetRep: "", firmaLibro: "", togaBirrete: "", fotoLibre: "", fotoAdicional: "" });
 
@@ -390,7 +414,10 @@ export async function upsertAuthUser(
   return { ok: true };
 }
 
-/* Login real contra Supabase Auth (bcrypt en servidor + JWT). */
+/* Login real contra Supabase Auth (bcrypt en servidor + JWT).
+   Mantiene la sesión Auth ACTIVA (persistida en localStorage con clave
+   aislada por proyecto) para que en Vercel/producción el token JWT y su
+   auto-refresh sobrevivan a recargas — requisito de persistencia de sesión. */
 export async function loginAuth(client: SupabaseClient, email: string, password: string): Promise<ResultadoAuth> {
   try {
     const { error } = await client.auth.signInWithPassword({ email, password });
@@ -400,11 +427,15 @@ export async function loginAuth(client: SupabaseClient, email: string, password:
       if (/rate limit/.test(msg)) return { ok: false, error: "demasiados intentos, espera unos minutos" };
       return { ok: false, error: error.message };
     }
-    await client.auth.signOut(); /* solo queríamos verificar; sesión local gestionada por el CRM */
     return { ok: true };
   } catch (e: any) {
     return { ok: false, error: e?.message || "fallo de red" };
   }
+}
+
+/* Cierre de sesión Auth al salir del CRM (elimina el JWT persistido). */
+export async function logoutAuth(client: SupabaseClient): Promise<void> {
+  try { await client.auth.signOut(); } catch { /* noop */ }
 }
 
 /* Desactivar/eliminar también en Auth para que nadie entre con un JWT viejo. */
