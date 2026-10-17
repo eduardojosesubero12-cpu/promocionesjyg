@@ -808,13 +808,28 @@ export const SUPABASE_SETUP_SQL = (() => {
    Se genera dinámicamente a partir de la lista de faltantes
    detectada por la verificación de conexión.
    ============================================================ */
+/* Devuelve el bloque "create table if not exists X (...);" del esquema maestro.
+   Busca primero en la sección principal y, si no aparece, en todo el SQL. */
+function _bloqueTabla(t: string): string | null {
+  const secciones = SUPABASE_SQL.split(/-- ═+ /);
+  const principal = secciones.length > 1 ? secciones[1] : SUPABASE_SQL;
+  const re = new RegExp(`create table if not exists ${t} \\([\\s\\S]*?\\);`, "m");
+  const m = principal.match(re) || SUPABASE_SQL.match(re);
+  return m ? m[0] : null;
+}
+
 export function sqlParaTablasFaltantes(faltantes: string[]): string {
   if (!faltantes.length) return "";
   const bloques: string[] = [];
   for (const t of faltantes) {
-    const re = new RegExp(`create table if not exists ${t} \\([\\s\\S]*?\\);`, "m");
-    const m = SUPABASE_SQL.match(re);
-    if (m) bloques.push(m[0]);
+    const m = _bloqueTabla(t);
+    if (m) bloques.push(m);
+    /* Si la tabla ya existía con un esquema antiguo, se agregan las columnas
+       que faltan (IF NOT EXISTS: no borra ni pisa datos existentes). */
+    const def = ESQUEMA_TABLAS.find((x) => x.tabla === t);
+    if (def) for (const [col, tipo] of def.columnas) {
+      bloques.push(`alter table ${t} add column if not exists ${col} ${tipo.replace(/ references \w+\(id\)( on delete cascade)?/i, "")};`);
+    }
     bloques.push(`alter table ${t} enable row level security;`);
     bloques.push(`drop policy if exists "crm_all" on ${t};`);
     bloques.push(`create policy "crm_all" on ${t} for all using (true) with check (true);`);
