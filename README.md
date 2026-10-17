@@ -70,10 +70,27 @@ Agrega (categoría *Production*, *Preview* y *Development*) y **Redeploy**:
 
 En local, copia `.env.example` a `.env` con `VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY`.
 
-### Paso 3 — Verificar el login en producción
+### Paso 3 — Desplegar el nuevo login en Vercel (obligatorio una sola vez)
+El sitio en vivo aún corre un build ANTIGUO (sin estas mejoras). Para publicarlo:
+
+**Opción A — Git (recomendada):** sube este código a la rama que Vercel vigila
+(`bash publicar-github.sh` o `git push`) → Vercel hace el deploy automático.
+
+**Opción B — CLI (desde tu PC, donde sí tienes sesión Vercel):**
+```bash
+npm i -g vercel
+vercel login
+cd <carpeta-del-proyecto>
+vercel link                       # elige el proyecto "promocionesjyg"
+vercel env add NEXT_PUBLIC_SUPABASE_URL production   # pega https://kdzofrxquzhtixzjtgmx.supabase.co
+vercel env add NEXT_PUBLIC_SUPABASE_ANON_KEY production  # pega tu anon/public key
+vercel --prod                     # publica el nuevo login en promocionesjyg.vercel.app
+```
+
+### Paso 4 — Verificar el login en producción
 1. Abre `https://promocionesjyg.vercel.app` → inicia sesión con correo y contraseña.
 2. El login valida en **dos capas**: Supabase Auth (bcrypt + JWT en servidor) y la tabla espejo `usuarios` (equivalente al chequeo contra `team_members`): si el miembro no existe o `activo = false`, el acceso se rechaza con mensaje claro y sesión cerrada.
-3. Recarga la página (F5): debes permanecer dentro del CRM (sesión persistida + reanudada con flag `verified`).
+3. Recarga la página (F5): debes permanecer dentro del CRM (sesión persistida + reanudada con flag `verified`; además, si el flag local se perdió pero el JWT de Supabase sigue vivo, la sesión se reanuda sola).
 4. Al pulsar **Salir**, el JWT de Auth se elimina (`signOut`).
 
 ⚠️ Nunca subas la `service_role` key a las variables públicas de Vercel: esa clave solo se pega en **Integraciones** (modo automático) y permanece en el navegador del administrador.

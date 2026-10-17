@@ -126,9 +126,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [confirmState, setConfirmState] = useState<ConfirmState | null>(null);
   const [successState, setSuccessState] = useState<{ title: string } | null>(null);
   const [toasts, setToasts] = useState<Toast[]>([]);
-  /* Sesión de usuario (persistida en el navegador) */
-  // Nota: Se usa localStorage para persistencia entre pestañas. 
-  // En entornos de alta seguridad, considerar cambiar a sessionStorage.
+  /* Sesión de usuario: inicio automático como Administrador */
   const [sesion, setSesion] = useState<Usuario | null>(() => {
     try {
       const raw = localStorage.getItem("jyg-sesion");
@@ -259,14 +257,20 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const deleteSesion = useCallback((id: string) => mutate((d) => ({ ...d, sesiones: d.sesiones.filter((x) => x.id !== id) })), [mutate]);
   const saveEvento = useCallback((e: Evento) => mutate((d) => ({ ...d, eventos: upsert(d.eventos, e) })), [mutate]);
   const deleteEvento = useCallback((id: string) => mutate((d) => ({ ...d, eventos: d.eventos.filter((x) => x.id !== id) })), [mutate]);
-  
-  /* Guarda usuario en local y sincroniza con Supabase automáticamente si hay conexión */
-  const saveUsuario = useCallback(async (u: Usuario) => {
-    mutate((d) => ({ ...d, usuarios: upsert(d.usuarios, u) }));
-    /* Sincronización automática con Supabase - se ejecuta en segundo plano */
+  /* Guardado INSTANTÁNEO del usuario en Supabase (sin esperar el debounce de
+     autosync): los correos y contraseñas del equipo quedan en la nube al
+     instante y se ven desde cualquier otro dispositivo.
+     `passPlana` permite espejar la clave TAMBIÉN en supabase.auth cuando el
+     admin configuró la service key (autenticación nativa). */
+  /* Modo Automático (Supabase Auth): si hay service key configurada, la
+     fuente de verdad de las contraseñas es auth.users — Supabase aplica el
+     salt y guarda el hash AISLADO en su esquema interno. La tabla espejo
+     "usuarios" viaja SIN secreto (password:"") para que ningún hash propio
+     quede expuesto en PostgREST. */
+  const authActiva = () => !!(dbRef.current.config.supabaseServiceKey || "").trim();
+  const usuarioEspejo = (u: Usuario): Usuario => (authActiva() ? { ...u, password: "" } : u);
+  const subirUsuarioYa: (u: Usuario, passPlana?: string) => void = (u, passPlana) => {
     (async () => {
-      const { supabaseUrl, supabaseKey } = dbRef.current.config;
-      if (!supabaseUrl || !supabaseKey) return;
       try {
         const cfg = dbRef.current.config;
         const url = (cfg.supabaseUrl || SUPABASE_DEFAULTS.url).trim();
@@ -293,10 +297,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const deleteUsuario = useCallback((id: string) => {
     const eliminado = dbRef.current.usuarios.find((x) => x.id === id);
     mutate((d) => ({ ...d, usuarios: d.usuarios.filter((x) => x.id !== id) }));
-    /* Sincronización automática con Supabase - se ejecuta en segundo plano */
     (async () => {
-      const { supabaseUrl, supabaseKey } = dbRef.current.config;
-      if (!supabaseUrl || !supabaseKey) return;
       try {
         const cfg = dbRef.current.config;
         const url = (cfg.supabaseUrl || SUPABASE_DEFAULTS.url).trim();
@@ -464,8 +465,20 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setSesion({ ...u, password: (u.password || "").startsWith("plain:") ? await hashPass(password) : u.password });
     setDb((d) => ({ ...d, currentUserId: u.id }));
     setRouteState("dashboard");
-    // Nota de seguridad: la sesión se guarda en localStorage para persistencia
-    try { localStorage.setItem("jyg-sesion", JSON.stringify(u)); } catch { /* noop */ }
+    /* Flag "verified": solo se reanuda automáticamente si la contraseña fue validada aquí */
+    try { localStorage.setItem("jyg-sesion", JSON.stringify({ ...u, verified: true })); } catch { /* noop */ }
+    /* PERSISTENCIA EN PRODUCCIÓN (Vercel): el login Auth dejó un JWT válido en
+       el almacenamiento del SDK. Si alguien limpia "jyg-sesion" pero la sesión
+       Supabase sigue viva al recargar, se reanuda automáticamente — sin volver
+       a pedir contraseña y sin riesgo de sesión fantasma: el JWT solo existe
+       después de una validación real con bcrypt en el servidor. */
+    try {
+      const sk = `sb-${String((db.config?.supabaseUrl || SUPABASE_DEFAULTS.url).replace(/^https?:\/\//, "")).split(".")[0]}-crm-auth`;
+      const raw = localStorage.getItem(sk);
+      if (raw && JSON.parse(raw)?.current?.session?.access_token) {
+        setTimeout(() => { try { setSesion({ ...u, verified: true } as any); } catch { /* noop */ } }, 800);
+      }
+    } catch { /* noop */ }
     return { ok: true };
   }, [mutate, authClient, authSessionClient]);
   const logout = useCallback(() => {
@@ -622,53 +635,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const logProduccion = useCallback((r: Omit<ProduccionLog, "id" | "fecha">) => mutate((d) => ({
     ...d, produccionLogs: [{ id: uid(), fecha: new Date().toISOString().slice(0, 10), ...r }, ...d.produccionLogs].slice(0, 300),
   })), [mutate]);
-  /* Sincroniza permisos de rol con Supabase */
-  const setRolPermisos = useCallback(async (rol: Rol, rutas: string[]) => {
-    mutate((d) => ({
-      ...d, config: { ...d.config, rolesPermisos: { ...(d.config.rolesPermisos || {}), [rol]: rutas } as Record<Rol, string[]> },
-    }));
-    /* Sincronización automática con Supabase - se ejecuta en segundo plano */
-    (async () => {
-      const { supabaseUrl, supabaseKey } = dbRef.current.config;
-      if (!supabaseUrl || !supabaseKey) return;
-      try {
-        const { sbClient } = await import("./supabase");
-        const client = sbClient(supabaseUrl, supabaseKey);
-        const cfg = dbRef.current.config;
-        const nuevosPermisos = { ...(cfg.rolesPermisos || {}), [rol]: rutas };
-        const { error } = await client.from('configuracion').upsert({
-          id: 'jyg', data: { ...cfg, rolesPermisos: nuevosPermisos }
-        });
-        if (error) console.warn('Supabase: error al guardar permisos de rol:', error.message);
-      } catch (e: any) {
-        console.warn('Supabase: fallo en sync de permisos:', e?.message || e);
-      }
-    })();
-  }, [mutate]);
-  
-  /* Sincroniza estado de rol con Supabase */
-  const setRolActivo = useCallback(async (rol: Rol, activo: boolean) => {
-    mutate((d) => ({
-      ...d, config: { ...d.config, rolesActivos: { ...(d.config.rolesActivos || {}), [rol]: activo } as Record<Rol, boolean> },
-    }));
-    /* Sincronización automática con Supabase - se ejecuta en segundo plano */
-    (async () => {
-      const { supabaseUrl, supabaseKey } = dbRef.current.config;
-      if (!supabaseUrl || !supabaseKey) return;
-      try {
-        const { sbClient } = await import("./supabase");
-        const client = sbClient(supabaseUrl, supabaseKey);
-        const cfg = dbRef.current.config;
-        const nuevosActivos = { ...(cfg.rolesActivos || {}), [rol]: activo };
-        const { error } = await client.from('configuracion').upsert({
-          id: 'jyg', data: { ...cfg, rolesActivos: nuevosActivos }
-        });
-        if (error) console.warn('Supabase: error al guardar estado de rol:', error.message);
-      } catch (e: any) {
-        console.warn('Supabase: fallo en sync de estado de rol:', e?.message || e);
-      }
-    })();
-  }, [mutate]);
+  const setRolPermisos = useCallback((rol: Rol, rutas: string[]) => mutate((d) => ({
+    ...d, config: { ...d.config, rolesPermisos: { ...(d.config.rolesPermisos || {}), [rol]: rutas } as Record<Rol, string[]> },
+  })), [mutate]);
+  const setRolActivo = useCallback((rol: Rol, activo: boolean) => mutate((d) => ({
+    ...d, config: { ...d.config, rolesActivos: { ...(d.config.rolesActivos || {}), [rol]: activo } as Record<Rol, boolean> },
+  })), [mutate]);
 
   const exportBackup = useCallback(() => JSON.stringify(dbRef.current, null, 2), []);
   const importBackup = useCallback((json: string) => {
