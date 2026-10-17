@@ -122,7 +122,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [confirmState, setConfirmState] = useState<ConfirmState | null>(null);
   const [successState, setSuccessState] = useState<{ title: string } | null>(null);
   const [toasts, setToasts] = useState<Toast[]>([]);
-  /* Sesión de usuario: inicio automático como Administrador */
+  /* Sesión de usuario (persistida en el navegador) */
+  // Nota: Se usa localStorage para persistencia entre pestañas. 
+  // En entornos de alta seguridad, considerar cambiar a sessionStorage.
   const [sesion, setSesion] = useState<Usuario | null>(() => {
     try {
       const raw = localStorage.getItem("jyg-sesion");
@@ -249,38 +251,43 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const deleteSesion = useCallback((id: string) => mutate((d) => ({ ...d, sesiones: d.sesiones.filter((x) => x.id !== id) })), [mutate]);
   const saveEvento = useCallback((e: Evento) => mutate((d) => ({ ...d, eventos: upsert(d.eventos, e) })), [mutate]);
   const deleteEvento = useCallback((id: string) => mutate((d) => ({ ...d, eventos: d.eventos.filter((x) => x.id !== id) })), [mutate]);
-  /* Guardado INSTANTÁNEO del usuario en Supabase (sin esperar el debounce de
-     autosync): los correos y contraseñas del equipo quedan en la nube al
-     instante y se ven desde cualquier otro dispositivo. */
-  const subirUsuarioYa: (u: Usuario) => void = (u) => {
-    (async () => {
-      try {
-        const cfg = dbRef.current.config;
-        const url = (cfg.supabaseUrl || SUPABASE_DEFAULTS.url).trim();
-        const key = (cfg.supabaseKey || SUPABASE_DEFAULTS.key).trim();
-        if (!url || !key) return;
-        const { sbClient, subirUsuarioInmediato } = await import("./supabase");
-        const r = await subirUsuarioInmediato(sbClient(url, key), u);
-        if (r.ok) setSyncInfo({ last: Date.now(), ok: true, msg: `Usuario "${u.nombre}" guardado en Supabase al instante` });
-        else setSyncInfo({ last: Date.now(), ok: false, msg: "El usuario se guardó localmente, pero falló la nube: " + (r.error || "") });
-      } catch { /* el autosync general reintentará enseguida */ }
-    })();
-  };
-  const saveUsuario = useCallback((u: Usuario) => {
+  
+  /* Guarda usuario en local y sincroniza con Supabase automáticamente si hay conexión */
+  const saveUsuario = useCallback(async (u: Usuario) => {
     mutate((d) => ({ ...d, usuarios: upsert(d.usuarios, u) }));
-    subirUsuarioYa(u);
-  }, [mutate]);
-  const deleteUsuario = useCallback((id: string) => {
-    mutate((d) => ({ ...d, usuarios: d.usuarios.filter((x) => x.id !== id) }));
+    /* Sincronización automática con Supabase - se ejecuta en segundo plano */
     (async () => {
+      const { supabaseUrl, supabaseKey } = dbRef.current.config;
+      if (!supabaseUrl || !supabaseKey) return;
       try {
-        const cfg = dbRef.current.config;
-        const url = (cfg.supabaseUrl || SUPABASE_DEFAULTS.url).trim();
-        const key = (cfg.supabaseKey || SUPABASE_DEFAULTS.key).trim();
-        if (!url || !key) return;
-        const { sbClient, eliminarUsuarioInmediato } = await import("./supabase");
-        await eliminarUsuarioInmediato(sbClient(url, key), id);
-      } catch { /* noop */ }
+        const { sbClient } = await import("./supabase");
+        const client = sbClient(supabaseUrl, supabaseKey);
+        const { error } = await client.from('usuarios').upsert({
+          id: u.id, nombre: u.nombre, usuario: u.usuario, email: u.email,
+          password: u.password, rol: u.rol, activo: u.activo
+        });
+        if (error) console.warn('Supabase: error al guardar usuario:', error.message);
+      } catch (e: any) {
+        console.warn('Supabase: fallo en sync de usuario:', e?.message || e);
+      }
+    })();
+  }, [mutate]);
+  
+  /* Elimina usuario en local y sincroniza con Supabase automáticamente si hay conexión */
+  const deleteUsuario = useCallback(async (id: string) => {
+    mutate((d) => ({ ...d, usuarios: d.usuarios.filter((x) => x.id !== id) }));
+    /* Sincronización automática con Supabase - se ejecuta en segundo plano */
+    (async () => {
+      const { supabaseUrl, supabaseKey } = dbRef.current.config;
+      if (!supabaseUrl || !supabaseKey) return;
+      try {
+        const { sbClient } = await import("./supabase");
+        const client = sbClient(supabaseUrl, supabaseKey);
+        const { error } = await client.from('usuarios').delete().eq('id', id);
+        if (error) console.warn('Supabase: error al eliminar usuario:', error.message);
+      } catch (e: any) {
+        console.warn('Supabase: fallo en sync de usuario:', e?.message || e);
+      }
     })();
   }, [mutate]);
 
@@ -339,8 +346,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setSesion(u);
     setDb((d) => ({ ...d, currentUserId: u.id }));
     setRouteState("dashboard");
-    /* Flag "verified": solo se reanuda automáticamente si la contraseña fue validada aquí */
-    try { localStorage.setItem("jyg-sesion", JSON.stringify({ ...u, verified: true })); } catch { /* noop */ }
+    // Nota de seguridad: la sesión se guarda en localStorage para persistencia
+    try { localStorage.setItem("jyg-sesion", JSON.stringify(u)); } catch { /* noop */ }
     return { ok: true };
   }, [mutate]);
   const logout = useCallback(() => {
@@ -399,12 +406,53 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const logProduccion = useCallback((r: Omit<ProduccionLog, "id" | "fecha">) => mutate((d) => ({
     ...d, produccionLogs: [{ id: uid(), fecha: new Date().toISOString().slice(0, 10), ...r }, ...d.produccionLogs].slice(0, 300),
   })), [mutate]);
-  const setRolPermisos = useCallback((rol: Rol, rutas: string[]) => mutate((d) => ({
-    ...d, config: { ...d.config, rolesPermisos: { ...(d.config.rolesPermisos || {}), [rol]: rutas } as Record<Rol, string[]> },
-  })), [mutate]);
-  const setRolActivo = useCallback((rol: Rol, activo: boolean) => mutate((d) => ({
-    ...d, config: { ...d.config, rolesActivos: { ...(d.config.rolesActivos || {}), [rol]: activo } as Record<Rol, boolean> },
-  })), [mutate]);
+  /* Sincroniza permisos de rol con Supabase */
+  const setRolPermisos = useCallback(async (rol: Rol, rutas: string[]) => {
+    mutate((d) => ({
+      ...d, config: { ...d.config, rolesPermisos: { ...(d.config.rolesPermisos || {}), [rol]: rutas } as Record<Rol, string[]> },
+    }));
+    /* Sincronización automática con Supabase - se ejecuta en segundo plano */
+    (async () => {
+      const { supabaseUrl, supabaseKey } = dbRef.current.config;
+      if (!supabaseUrl || !supabaseKey) return;
+      try {
+        const { sbClient } = await import("./supabase");
+        const client = sbClient(supabaseUrl, supabaseKey);
+        const cfg = dbRef.current.config;
+        const nuevosPermisos = { ...(cfg.rolesPermisos || {}), [rol]: rutas };
+        const { error } = await client.from('configuracion').upsert({
+          id: 'jyg', data: { ...cfg, rolesPermisos: nuevosPermisos }
+        });
+        if (error) console.warn('Supabase: error al guardar permisos de rol:', error.message);
+      } catch (e: any) {
+        console.warn('Supabase: fallo en sync de permisos:', e?.message || e);
+      }
+    })();
+  }, [mutate]);
+  
+  /* Sincroniza estado de rol con Supabase */
+  const setRolActivo = useCallback(async (rol: Rol, activo: boolean) => {
+    mutate((d) => ({
+      ...d, config: { ...d.config, rolesActivos: { ...(d.config.rolesActivos || {}), [rol]: activo } as Record<Rol, boolean> },
+    }));
+    /* Sincronización automática con Supabase - se ejecuta en segundo plano */
+    (async () => {
+      const { supabaseUrl, supabaseKey } = dbRef.current.config;
+      if (!supabaseUrl || !supabaseKey) return;
+      try {
+        const { sbClient } = await import("./supabase");
+        const client = sbClient(supabaseUrl, supabaseKey);
+        const cfg = dbRef.current.config;
+        const nuevosActivos = { ...(cfg.rolesActivos || {}), [rol]: activo };
+        const { error } = await client.from('configuracion').upsert({
+          id: 'jyg', data: { ...cfg, rolesActivos: nuevosActivos }
+        });
+        if (error) console.warn('Supabase: error al guardar estado de rol:', error.message);
+      } catch (e: any) {
+        console.warn('Supabase: fallo en sync de estado de rol:', e?.message || e);
+      }
+    })();
+  }, [mutate]);
 
   const exportBackup = useCallback(() => JSON.stringify(dbRef.current, null, 2), []);
   const importBackup = useCallback((json: string) => {

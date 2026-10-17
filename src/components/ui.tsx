@@ -38,10 +38,13 @@ export function QR({ value, size = 92, className }: { value: string; size?: numb
   const [svg, setSvg] = useState("");
   useEffect(() => {
     let alive = true;
+    // Generar QR code SVG - solo contenido generado internamente (seguro contra XSS)
     QRCodeLib.toString(value || " ", { type: "svg", margin: 1, errorCorrectionLevel: "M", width: size })
       .then((s) => { if (alive) setSvg(s); }).catch(() => undefined);
     return () => { alive = false; };
   }, [value, size]);
+  // Nota: dangerouslySetInnerHTML es seguro aquí porque el SVG es generado por QRCodeLib
+  // y no contiene entrada de usuario directa. Solo se renderizan códigos QR internos.
   return <span className={className} style={{ display: "inline-flex", lineHeight: 0 }} dangerouslySetInnerHTML={{ __html: svg }} />;
 }
 
