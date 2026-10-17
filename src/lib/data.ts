@@ -1032,6 +1032,10 @@ export const SEED_CONFIG: Config = {
   supabaseUrl: "https://kdzofrxquzhtixzjtgmx.supabase.co",
   supabaseKey: "sb_publishable_ibQlrVHQi9oqKd5iw3X3CA_fpSMjzFq",
   autoSyncCloud: true,
+  /* RLS estricta por rol activada (SQL crm_rls_estricto ejecutado en Supabase).
+     Con esto, la anon key queda bloqueada y el CRM entra en modo híbrido:
+     login Auth + sincronización con la service role. */
+  rlsEstricto: true,
   /* La API key se configura desde Configuración y se guarda en Supabase (nunca en el código) */
   openRouterKey: "", openRouterModel: OPENROUTER_MODELOS[0].id,
 };

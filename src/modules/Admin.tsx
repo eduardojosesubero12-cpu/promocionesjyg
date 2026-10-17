@@ -11,6 +11,7 @@ import {
   computeProduccion, downloadFile, estudianteTotales, fmtBs, fmtFecha, fmtFechaHoraViva, fmtHaceSegundos,
   fmtUSD, getAdicionales, getGrados, getSecciones, getTallas, hashPass, toCSV, todayISO, uid, validarPassFuerte, verificarPass,
 } from "../lib/data";
+import { SUPABASE_SETUP_AUTOMATICO_SQL, SETUP_ADMIN_EMAIL, SETUP_ADMIN_PASS } from "../lib/setup";
 import {
   Badge, Bar, EmptyState, Field, FilterSelect, FormFoot, FormSec, Modal, SearchInput, SectionHead,
   Switch, Toolbar, estadoPagoTone, useNow,
@@ -934,6 +935,7 @@ export function Integraciones() {
   const [syncAuthBusy, setSyncAuthBusy] = useState(false);
   const [syncAuthResumen, setSyncAuthResumen] = useState("");
   const [verRls, setVerRls] = useState(false);
+  const [verSetup, setVerSetup] = useState(false);
   const [rlsEstricto, setRlsEstricto] = useState(!!db.config.rlsEstricto);
   const ejecutarSyncAuth = async () => {
     setSyncAuthBusy(true);
@@ -1061,6 +1063,35 @@ export function Integraciones() {
                 {syncAuthResumen && <p className="mt-2 mb-0" style={{ fontSize: 11.5, fontFamily: "ui-monospace, monospace", color: "var(--ink)" }}>{syncAuthResumen}</p>}
               </div>
             )}
+
+            {/* ── CONFIGURACIÓN AUTOMÁTICA DE SUPABASE (script único) ── */}
+            <div className="mt-3 p-2 rounded" style={{ background: "rgba(99,102,241,.07)", border: "1px solid rgba(99,102,241,.3)" }}>
+              <div className="d-flex align-items-center gap-2 flex-wrap">
+                <Sparkles size={15} style={{ color: "#818cf8" }} />
+                <b style={{ fontSize: 12.5 }}>Configuración automática de Supabase (1 solo script)</b>
+                <Badge tone="blue">Tablas + Admin Auth + RLS estricta</Badge>
+              </div>
+              <p className="mt-1 mb-2" style={{ fontSize: 11.5, color: "var(--ink-soft)" }}>
+                Copia este SQL y ejecútalo una sola vez en <b>Supabase → SQL Editor → New query → Run</b>. Crea las 18 tablas,
+                registra al administrador <code>{SETUP_ADMIN_EMAIL}</code> como usuario real de Supabase Auth (con la contraseña definida
+                <code> {SETUP_ADMIN_PASS}</code>, hasheada con salt+bcrypt <b>en el servidor</b>), crea su fila espejo sin secretos
+                y activa todas las políticas RLS por rol. Es idempotente: puedes repetirlo sin perder datos.
+              </p>
+              <div className="d-flex gap-2 flex-wrap align-items-center">
+                <button className="btn btn-sm btn-soft" onClick={() => setVerSetup(!verSetup)}>
+                  <Code size={13} /> {verSetup ? "Ocultar SQL de configuración" : "Ver / copiar SQL de configuración automática"}
+                </button>
+                <button className="btn btn-gold btn-xs" onClick={() => { navigator.clipboard?.writeText(SUPABASE_SETUP_AUTOMATICO_SQL).then(() => toast("SQL de configuración copiado — pégalo en Supabase → SQL Editor", "ok")); }}>
+                  <Copy size={11} /> Copiar todo
+                </button>
+                <button className="btn btn-ghost btn-xs" style={{ background: "rgba(255,255,255,0.08)", color: "#a8c6e8", borderColor: "rgba(168,198,232,0.3)" }} onClick={() => { downloadFile("configurar-supabase-jyg.sql", SUPABASE_SETUP_AUTOMATICO_SQL, "text/plain"); toast("configurar-supabase-jyg.sql descargado", "ok"); }}>
+                  <Download size={11} /> Descargar .sql
+                </button>
+              </div>
+              {verSetup && (
+                <pre className="mt-2 p-3 rounded-3 overflow-auto" style={{ background: "#0d1524", color: "#a8c6e8", fontSize: 10.5, maxHeight: 300, fontFamily: "ui-monospace, Menlo, monospace" }}>{SUPABASE_SETUP_AUTOMATICO_SQL}</pre>
+              )}
+            </div>
 
             {/* ── RLS ESTRICTA POR ROL (políticas de seguridad en Supabase) ── */}
             <div className="mt-3 p-2 rounded" style={{ background: rlsEstricto ? "rgba(16,185,129,.07)" : "rgba(245,158,11,.07)", border: `1px solid ${rlsEstricto ? "rgba(16,185,129,.25)" : "rgba(245,158,11,.3)"}` }}>

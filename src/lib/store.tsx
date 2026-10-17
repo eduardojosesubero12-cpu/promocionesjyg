@@ -599,8 +599,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   /* Supabase (carga perezosa del SDK) */
   const clienteSb = useCallback(async (urlArg?: string, keyArg?: string) => {
-    const url = (urlArg || dbRef.current.config.supabaseUrl || SUPABASE_DEFAULTS.url).trim();
-    const key = (keyArg || dbRef.current.config.supabaseKey || SUPABASE_DEFAULTS.key).trim();
+    const cfg = dbRef.current.config;
+    const url = (urlArg || cfg.supabaseUrl || SUPABASE_DEFAULTS.url).trim();
+    /* MODO AUTOMÁTICO + RLS ESTRICTA: la anon key queda bloqueada por las
+       políticas; toda lectura/escritura debe ir con la service role. */
+    const estricto = !!cfg.rlsEstricto && !urlArg && !!(cfg.supabaseServiceKey || "").trim();
+    const key = estricto ? (cfg.supabaseServiceKey || "").trim() : (keyArg || cfg.supabaseKey || SUPABASE_DEFAULTS.key).trim();
     if (!url || !key) return null;
     /* Si el usuario no configuró credenciales propias, usamos las del proyecto (.env) */
     if (url !== dbRef.current.config.supabaseUrl || key !== dbRef.current.config.supabaseKey) {
@@ -727,7 +731,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       if (!cfg.supabaseUrl || !cfg.supabaseKey) return;
       try {
         const { sbClient } = await import("./supabase");
-        const client = sbClient(cfg.supabaseUrl, cfg.supabaseKey);
+        /* Con RLS estricta, la anon key no puede suscribirse a los cambios:
+           se usa la service role (solo si está configurada). */
+        const rtKey = (!!cfg.rlsEstricto && (cfg.supabaseServiceKey || "").trim()) ? cfg.supabaseServiceKey!.trim() : cfg.supabaseKey;
+        const client = sbClient(cfg.supabaseUrl, rtKey);
         channel = client.channel("jyg-tiempo-real");
         channel.on("postgres_changes", { event: "*", schema: "public" }, () => {
           if (applyingRemote.current) return;
@@ -788,6 +795,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   /* Si el usuario con sesión fue eliminado o desactivado por un administrador, se cierra su sesión */
   useEffect(() => {
     if (!sesion) return;
+    /* Con RLS estricta la tabla "usuarios" solo expone la fila propia: una
+       lista vacía NO significa que el usuario fue borrado (sería un falso
+       positivo y expulsaría al admin). Se exige además que la nube haya
+       devuelto otros usuarios para confiar en el chequeo. */
+    if (dbRef.current.config.rlsEstricto && db.usuarios.length === 0) return;
     const actual = db.usuarios.find((u) => u.id === sesion.id);
     if (db.usuarios.length > 0 && (!actual || !actual.activo)) {
       setSesion(null);
