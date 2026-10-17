@@ -78,6 +78,10 @@ export interface Config {
      (supabase.auth). Solo se usa para administrar usuarios; si está vacía,
      el CRM funciona con el esquema legacy local. NUNCA es la anon key. */
   supabaseServiceKey?: string;
+  /* Modo RLS estricto: activa las políticas por rol en Supabase (SQL "crm_rls_estricto").
+     Con true, el CRM se autentica con Supabase Auth (JWT real) y la anon key deja
+     de poder leer/escribir directo. Requiere service key + usuarios sincronizados. */
+  rlsEstricto?: boolean;
   rolesPermisos?: Record<Rol, string[]>;
   rolesActivos?: Record<Rol, boolean>;
   /* Motor de escaneo IA — Qwen vía OpenRouter (se guarda en Supabase con la config) */
@@ -491,6 +495,99 @@ const _tipoAlter = (def: string) =>
     .replace(/\s*primary key/i, "")
     .replace(/\s*not null/i, "")
     .replace(/\s*references\s+\w+\s*\(\w+\)(\s*on delete cascade)?/i, "");
+
+/* ============================================================
+   RLS ESTRICTO — políticas por rol con Supabase Auth (JWT)
+   Pegar en: Supabase → SQL Editor → New query → Run.
+   Requiere que los usuarios existan en auth.users y en la tabla
+   "usuarios" con el mismo id (el CRM los sincroniza automáticamente).
+   ============================================================ */
+export const SUPABASE_RLS_ESTRICTO_SQL = `-- ═══════════════════════════════════════════════════════════
+-- CRM PROMOCIONES JyG — RLS ESTRICTA POR ROL (Supabase Auth + JWT)
+-- Ejecutar DESPUÉS de tener: service key configurada, usuarios
+-- sincronizados (Administración → Sincronizar con Supabase Auth)
+-- y rlsEstricto activado en Integraciones.
+-- Efecto: la anon key deja de poder leer/escribir directo; solo
+-- entran sesiones autenticadas cuyo usuario está ACTIVO en "usuarios".
+-- ═══════════════════════════════════════════════════════════
+
+-- 1) Helper: sesión válida = usuario autenticado Y activo en la espejo.
+--    security definer: puede leer "usuarios" aunque esa tabla tenga RLS.
+create or replace function public.crm_es_activo()
+returns boolean language sql stable security definer set search_path = public as $$
+  select exists (
+    select 1 from public.usuarios u
+    where u.id = (auth.uid())::text and u.activo = true
+  );
+$$;
+
+-- 2) Helper: rol del usuario autenticado ('admin', 'operador', ...).
+create or replace function public.crm_rol()
+returns text language sql stable security definer set search_path = public as $$
+  select coalesce((
+    select u.rol from public.usuarios u
+    where u.id = (auth.uid())::text and u.activo = true
+  ), '');
+$$;
+
+-- 3) Tablas de operación: todo miembro ACTIVO puede leer y escribir.
+do $$
+declare t text;
+begin
+  foreach t in array array['escuelas','docentes','estudiantes','pagos','adicionales_items',
+                           'cotizaciones','cotizacion_items','sesiones','eventos','mensajes',
+                           'historial_tasas','paquetes_escuelas','facturas','tarjetas_qr',
+                           'escaneos_ocr','registros_produccion']
+  loop
+    execute format('alter table public.%I enable row level security;', t);
+    execute format('drop policy if exists "crm_all" on public.%I;', t);
+    execute format('drop policy if exists "crm_operacion" on public.%I;', t);
+    execute format('create policy "crm_operacion" on public.%I for all to authenticated
+      using (public.crm_es_activo()) with check (public.crm_es_activo());', t);
+  end loop;
+end $$;
+
+-- 4) Configuración: lectura para miembros activos, escritura solo admin.
+alter table public.configuracion enable row level security;
+drop policy if exists "crm_all" on public.configuracion;
+drop policy if exists "crm_config_lectura" on public.configuracion;
+drop policy if exists "crm_config_escritura" on public.configuracion;
+create policy "crm_config_lectura" on public.configuracion for select to authenticated
+  using (public.crm_es_activo());
+create policy "crm_config_escritura" on public.configuracion for all to authenticated
+  using (public.crm_rol() = 'admin') with check (public.crm_rol() = 'admin');
+
+-- 5) Usuarios: cada quien ve SU fila; el admin ve y edita todas.
+--    (Así un operador no puede espiar hashes/correos ajenos ni ascenderse.)
+alter table public.usuarios enable row level security;
+drop policy if exists "crm_all" on public.usuarios;
+drop policy if exists "crm_usuarios_mismo" on public.usuarios;
+drop policy if exists "crm_usuarios_admin" on public.usuarios;
+create policy "crm_usuarios_mismo" on public.usuarios for select to authenticated
+  using ((id = (auth.uid())::text) or public.crm_rol() = 'admin');
+create policy "crm_usuarios_admin" on public.usuarios for all to authenticated
+  using (public.crm_rol() = 'admin') with check (public.crm_rol() = 'admin');
+
+-- 6) Anti-escalada: nadie puede auto-cambiarse el rol ni reactivarse.
+--    (La política 5 ya lo impide para no-admins; esto protege además al admin
+--     despistado: solo el propio interesado o un admin pueden tocar su pass.)
+create or replace function public.crm_no_escalada()
+returns trigger language plpgsql security definer set search_path = public as $$
+begin
+  -- Si cambia rol/activo y el que escribe NO es admin → bloquear.
+  if (new.rol is distinct from old.rol or new.activo is distinct from old.activo)
+     and public.crm_rol() <> 'admin' then
+    raise exception 'Escalada de privilegios bloqueada';
+  end if;
+  return new;
+end $$;
+drop trigger if exists trg_crm_no_escalada on public.usuarios;
+create trigger trg_crm_no_escalada before update on public.usuarios
+  for each row execute function public.crm_no_escalada();
+
+-- ═══ LISTO (RLS ESTRICTA) ═══
+-- Verifica en el CRM: debe iniciar sesión con Supabase Auth (modo automático).
+-- Para volver al modo simple, ejecutar el script SETUP normal (política crm_all).`;
 
 export const SUPABASE_SCHEMA_SEGURO = (() => {
   const p: string[] = [];
