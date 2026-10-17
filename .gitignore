@@ -1,1 +1,10 @@
-dist/
+```
+# Environment
+.env.local
+
+# Dependencies
+node_modules/
+
+# Original rules preserved
+.env
+```
