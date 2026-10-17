@@ -59,6 +59,11 @@ export async function dbToRows(client: SupabaseClient | null, db: CRMData): Prom
   const hayApellido = client ? await existeColumna(client, "estudiantes", "apellido") : false;
   const hashCol = client ? (await existeColumna(client, "usuarios", "password_hash") ? "password_hash" : "password") : "password";
   const usuarioCol = client ? await existeColumna(client, "usuarios", "usuario") : true;
+  /* MODO AUTOMÁTICO: si el proyecto tiene Supabase Auth activo (service key),
+     la contraseña vive SOLO en auth.users con salt+bcrypt gestionados por
+     Supabase. La tabla espejo viaja SIN secreto — así ningún hash propio se
+     expone vía PostgREST y no puede corromperse al sincronizar. */
+  const authActiva = !!(db.config?.supabaseServiceKey || "").trim();
   return {
     escuelas: db.escuelas.map((e) => ({ id: e.id, nombre: e.nombre || "", director: e.director, telefono: e.telefono, direccion: e.direccion, estado: e.estado, municipio: e.municipio, anio_escolar: e.anioEscolar, observaciones: e.observaciones })),
     docentes: db.docentes.map((d) => ({ id: d.id, nombre: d.nombre || "", telefono: d.telefono, escuela_id: d.escuelaId || null, correo: d.correo, observaciones: d.observaciones })),
@@ -75,7 +80,7 @@ export async function dbToRows(client: SupabaseClient | null, db: CRMData): Prom
     sesiones: db.sesiones.map((s) => ({ id: s.id, escuela_id: s.escuelaId || null, fecha: s.fecha, hora: s.hora, fotografo: s.fotografo, estado: s.estado, fotos: s.fotos, nota: s.nota })),
     eventos: db.eventos.map((e) => ({ id: e.id, fecha: e.fecha, hora: e.hora, titulo: e.titulo, tipo: e.tipo, escuela_id: e.escuelaId || null })),
     mensajes: db.mensajes.map((m) => ({ id: m.id, fecha: m.fecha, destinatario: m.destinatario, telefono: m.telefono, plantilla: m.plantilla, texto: m.texto })),
-    usuarios: db.usuarios.map((u) => { const r: any = { id: u.id, nombre: u.nombre, email: u.email || "", rol: u.rol, activo: u.activo, [hashCol]: cifrarPass(u.password || "") }; if (usuarioCol) r.usuario = u.usuario; return r; }),
+    usuarios: db.usuarios.map((u) => { const r: any = { id: u.id, nombre: u.nombre, email: u.email || "", rol: u.rol, activo: u.activo, [hashCol]: authActiva ? "" : cifrarPass(u.password || "") }; if (usuarioCol) r.usuario = u.usuario; return r; }),
     historial_tasas: db.historialTasas.map((h) => ({ id: h.id, fecha: h.fecha, usd: h.usd, euro: h.euro, paralelo: h.paralelo, fuente: h.fuente, actualizado: h.actualizado })),
     paquetes_escuelas: db.paquetesEscuelas.map((p) => ({ id: p.id, escuela_id: p.escuelaId, nombre: p.nombre, tipo_paquete_id: p.tipoPaqueteId, precio: p.precio, articulos: p.articulos, nota: p.nota, activo: p.activo, creado: p.creado })),
     facturas: (db.facturas || []).map((f) => ({ id: f.id, numero: f.numero, estudiante_id: f.estudianteId, estudiante: f.estudiante, fecha: f.fecha, total: f.total, accion: f.accion })),
@@ -417,6 +422,67 @@ export async function existeEnAuth(client: SupabaseClient, email: string): Promi
     const { data: lista } = await client.auth.admin.listUsers({ page: 1, perPage: 1000 });
     return (lista?.users || []).some((u: any) => (u.email || "").toLowerCase() === (email || "").toLowerCase());
   } catch { return false; }
+}
+
+/* ============================================================
+   SINCRONIZACIÓN MASIVA AUTOMÁTICA → Supabase Auth
+   El cliente SOLO envía la contraseña en texto plano por HTTPS;
+   Supabase la intercepta, aplica salt + bcrypt y guarda el hash
+   AISLADO en su esquema interno auth.users. Nunca se sube un hash
+   propio a la tabla pública "usuarios" cuando Auth está activo.
+   ============================================================ */
+export type SyncAuthResultado = { creados: number; actualizados: number; omitidos: number; errores: string[] };
+export async function sincronizarAuthMasivo(
+  client: SupabaseClient,
+  usuarios: Usuario[],
+  opts: { limpiarEspejo?: boolean } = {},
+): Promise<SyncAuthResultado> {
+  const res: SyncAuthResultado = { creados: 0, actualizados: 0, omitidos: 0, errores: [] };
+  let lista: any[] = [];
+  try {
+    const { data } = await client.auth.admin.listUsers({ page: 1, perPage: 1000 });
+    lista = data?.users || [];
+  } catch (e: any) {
+    return { ...res, errores: [`Sin acceso a supabase.auth (service role): ${e?.message || e}`] };
+  }
+  const hashCol = await existeColumna(client, "usuarios", "password_hash") ? "password_hash" : "password";
+  for (const u of usuarios) {
+    const email = (u.email || "").trim().toLowerCase();
+    if (!email) { res.omitidos++; continue; } /* sin correo no puede haber Auth real */
+    /* La contraseña local viaja descifrada solo por HTTPS hacia Auth */
+    const passPlana = descifrarPass(u.password || "");
+    if (!passPlana) { res.omitidos++; continue; }
+    const existente = lista.find((x: any) => (x.email || "").toLowerCase() === email);
+    try {
+      if (existente) {
+        const { error } = await client.auth.admin.updateUserById(existente.id, {
+          password: passPlana,
+          user_metadata: { nombre: u.nombre, usuario: u.usuario, rol: u.rol },
+        });
+        if (error) { res.errores.push(`${u.nombre}: ${error.message}`); continue; }
+        registrarPassCambio(u.id);
+        res.actualizados++;
+      } else {
+        const { error } = await client.auth.admin.createUser({
+          email, password: passPlana, email_confirm: true,
+          user_metadata: { nombre: u.nombre, usuario: u.usuario, rol: u.rol },
+        });
+        if (error) { res.errores.push(`${u.nombre}: ${error.message}`); continue; }
+        registrarPassCambio(u.id);
+        res.creados++;
+      }
+      /* Fuente de verdad = auth.users: la tabla espejo queda SIN secreto */
+      if (opts.limpiarEspejo) {
+        const invalidas = await columnasNoValidas(client, "usuarios");
+        const fila: any = { id: u.id, [hashCol]: "" };
+        const limpio = Object.fromEntries(Object.entries(fila).filter(([k]) => !invalidas.includes(k)));
+        await client.from("usuarios").update(limpio).eq("id", u.id);
+      }
+    } catch (e: any) {
+      res.errores.push(`${u.nombre}: ${e?.message || e}`);
+    }
+  }
+  return res;
 }
 
 /* Cambio directo de clave en supabase.auth sin conocer la anterior

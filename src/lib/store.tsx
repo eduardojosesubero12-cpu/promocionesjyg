@@ -256,6 +256,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
      instante y se ven desde cualquier otro dispositivo.
      `passPlana` permite espejar la clave TAMBIÉN en supabase.auth cuando el
      admin configuró la service key (autenticación nativa). */
+  /* Modo Automático (Supabase Auth): si hay service key configurada, la
+     fuente de verdad de las contraseñas es auth.users — Supabase aplica el
+     salt y guarda el hash AISLADO en su esquema interno. La tabla espejo
+     "usuarios" viaja SIN secreto (password:"") para que ningún hash propio
+     quede expuesto en PostgREST. */
+  const authActiva = () => !!(dbRef.current.config.supabaseServiceKey || "").trim();
+  const usuarioEspejo = (u: Usuario): Usuario => (authActiva() ? { ...u, password: "" } : u);
   const subirUsuarioYa: (u: Usuario, passPlana?: string) => void = (u, passPlana) => {
     (async () => {
       try {
@@ -264,12 +271,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         const key = (cfg.supabaseKey || SUPABASE_DEFAULTS.key).trim();
         if (!url || !key) return;
         const { sbClient, subirUsuarioInmediato, upsertAuthUser } = await import("./supabase");
-        const r = await subirUsuarioInmediato(sbClient(url, key), u);
+        const r = await subirUsuarioInmediato(sbClient(url, key), usuarioEspejo(u));
         let msg = `Usuario "${u.nombre}" guardado en Supabase al instante`;
         if (passPlana && cfg.supabaseServiceKey?.trim()) {
           const ra = await upsertAuthUser(sbClient(url, key, cfg.supabaseServiceKey.trim()), u, passPlana, { crearFila: false });
           if (!ra.ok) msg = ra.requiereCambio ? (ra.error || "") : "Se guardó localmente pero falló Supabase Auth: " + (ra.error || "");
-          else msg += " · registrado también en Supabase Auth ✔";
+          else msg += " · contraseña cifrada por Supabase Auth (salt + bcrypt en servidor) ✔";
         }
         setSyncInfo({ last: Date.now(), ok: r.ok, msg });
       } catch { /* el autosync general reintentará enseguida */ }
@@ -277,6 +284,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   };
   const saveUsuario = useCallback((u: Usuario) => {
     mutate((d) => ({ ...d, usuarios: upsert(d.usuarios, u) }));
+    /* Edición SIN clave nueva (correo, rol, activo): si Auth está activa, la
+       fila espejo se limpia igualmente y loginAuth usará solo la capa Auth. */
     subirUsuarioYa(u);
   }, [mutate]);
   const deleteUsuario = useCallback((id: string) => {
@@ -333,7 +342,35 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         return { ok: false, error: `Demasiados intentos fallidos. Vuelve a intentar en ${mins} minuto(s).` };
       }
     } catch { /* noop */ }
-    /* CAPA 1 — hash local (tabla espejo "usuarios"). */
+    /* MODO AUTOMÁTICO (Supabase Auth activo): la fuente de verdad es el
+       esquema interno auth.users — Supabase valida bcrypt+salt en servidor y
+       emite JWT. La tabla espejo NO contiene contraseñas en este modo. */
+    const ac = authClient();
+    if (ac && u.email) {
+      let registrado = false;
+      try { const { existeEnAuth } = await import("./supabase"); registrado = await existeEnAuth(ac, u.email); } catch { /* sin acceso admin: se usa la capa local */ }
+      if (registrado) {
+        const r = await loginAuth(ac, u.email, password);
+        if (!r.ok) {
+          if (r.error === "incorrectas") return { ok: false, error: "La contraseña no coincide con la registrada en Supabase Auth. Recupérala con «¿Olvidaste tu contraseña?» o pide un restablecimiento al administrador." };
+          return { ok: false, error: r.error ? `No se pudo validar con Supabase Auth: ${r.error}` : "No se pudo validar con Supabase Auth." };
+        }
+        /* Auth confirmó la clave → reparamos el hash local si estaba corrupto */
+        const validaLocal = await verificarPass(password, u.password || "");
+        if (!validaLocal) {
+          const reparado = await hashPass(password);
+          mutate((d) => ({ ...d, usuarios: d.usuarios.map((x) => (x.id === u.id ? { ...x, password: reparado } : x)) }));
+        }
+        try { const bl = JSON.parse(localStorage.getItem(BLOCK_KEY) || "{}"); delete bl[u.id]; localStorage.setItem(BLOCK_KEY, JSON.stringify(bl)); } catch { /* noop */ }
+        const listo: Usuario = { ...u, password: u.password || (await hashPass(password)) };
+        setSesion(listo);
+        setDb((d) => ({ ...d, currentUserId: listo.id }));
+        setRouteState("dashboard");
+        try { localStorage.setItem("jyg-sesion", JSON.stringify({ ...listo, verified: true })); } catch { /* noop */ }
+        return { ok: true };
+      }
+    }
+    /* CAPA LOCAL — hash en la tabla espejo "usuarios" (modo legacy). */
     let valida = await verificarPass(password, u.password || "");
     /* Respaldo de emergencia: si la contraseña llegó corrupta desde la nube
        (columna distinta / truncada), permite las credenciales semilla del
@@ -345,28 +382,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         const reparado = await hashPass(password);
         mutate((d) => ({ ...d, usuarios: d.usuarios.map((x) => (x.id === u.id ? { ...x, password: reparado } : x)) }));
       }
-    }
-    /* ¿Existe este correo como usuario real de Supabase Auth? Si sí, la clave
-       debe coincidir TAMBIÉN allí (Auth es la fuente de verdad). Si falló la
-       capa local pero Auth la confirma, reparamos el hash local y dejamos
-       pasar — así un corruption de la tabla espejo nunca encierra al equipo. */
-    const ac = authClient();
-    if (ac && u.email) {
-      try {
-        const { existeEnAuth } = await import("./supabase");
-        const registradoEnAuth = await existeEnAuth(ac, u.email);
-        if (registradoEnAuth) {
-          const r = await loginAuth(ac, u.email, password);
-          if (!r.ok && r.error === "incorrectas") {
-            return { ok: false, error: "La contraseña no coincide con la registrada en Supabase Auth. Recupérala con «¿Olvidaste tu contraseña?» o pide un restablecimiento al administrador." };
-          }
-          if (!valida && r.ok) {
-            valida = true; /* Auth confirmó la clave: reparamos el hash local */
-            const reparado = await hashPass(password);
-            mutate((d) => ({ ...d, usuarios: d.usuarios.map((x) => (x.id === u.id ? { ...x, password: reparado } : x)) }));
-          }
-        }
-      } catch { /* sin red hacia Auth: se permite el acceso con la capa local */ }
     }
     if (!valida) {
       /* registrar intento fallido */
