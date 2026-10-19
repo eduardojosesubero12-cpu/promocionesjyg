@@ -112,7 +112,7 @@ export interface ProduccionLog { id: string; fecha: string; detalle: string; mat
 
 export interface CRMData {
   escuelas: Escuela[]; docentes: Docente[]; estudiantes: Estudiante[]; cotizaciones: Cotizacion[];
-  eventos: Evento[]; mensajes: MensajeLog[]; usuarios: Usuario[];
+  sesiones: Sesion[]; eventos: Evento[]; mensajes: MensajeLog[]; usuarios: Usuario[];
   historialTasas: HistorialTasa[]; paquetesEscuelas: PaqueteEscuela[]; config: Config;
   facturas: FacturaLog[]; tarjetas: TarjetaLog[]; escaneos: EscaneoLog[]; produccionLogs: ProduccionLog[];
   currentUserId: string; seqPedido: number; seqCot: number;

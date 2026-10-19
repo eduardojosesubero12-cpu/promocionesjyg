@@ -28,23 +28,34 @@ const seedDB = (): DB => ({
   facturas: [], tarjetas: [], escaneos: [], produccionLogs: [],
   currentUserId: "u1", seqPedido: 2411, seqCot: 2403,
 });
+/* Sanea una base de datos (localStorage, respaldo importado o nube): toda
+   colección esperada como arreglo se garantiza arreglo. Sin esto, un campo
+   ausente o corrupto (p. ej. "sesiones": null o una versión vieja del
+   respaldo sin esa clave) revienta la vista con
+   "Cannot read properties of undefined (reading 'find')". */
+const sanearDB = (d: any): DB => {
+  const base = seedDB();
+  const cfg = { ...base.config, ...(d?.config || {}) };
+  /* Garantiza la conexión Supabase aunque el navegador tuviera credenciales vacías guardadas */
+  if (!cfg.supabaseUrl) cfg.supabaseUrl = base.config.supabaseUrl;
+  if (!cfg.supabaseKey) cfg.supabaseKey = base.config.supabaseKey;
+  const merged: DB = { ...base, ...(d || {}), config: cfg };
+  /* Sanea colecciones: cualquier lista corrupta o faltante vuelve a su valor base */
+  (Object.keys(base) as (keyof DB)[]).forEach((k) => {
+    if (Array.isArray(base[k]) && !Array.isArray((merged as any)[k])) (merged as any)[k] = base[k];
+  });
+  if (merged.usuarios.length === 0) merged.usuarios = base.usuarios;
+  /* Números de secuencia nunca NaN/undefined */
+  if (typeof merged.seqPedido !== "number" || !isFinite(merged.seqPedido)) merged.seqPedido = base.seqPedido;
+  if (typeof merged.seqCot !== "number" || !isFinite(merged.seqCot)) merged.seqCot = base.seqCot;
+  if (typeof merged.currentUserId !== "string") merged.currentUserId = base.currentUserId;
+  return merged;
+};
 const loadDB = (): DB => {
   try {
     const raw = localStorage.getItem(KEY);
     if (!raw) return seedDB();
-    const d = JSON.parse(raw);
-    const base = seedDB();
-    const cfg = { ...base.config, ...(d.config || {}) };
-    /* Garantiza la conexión Supabase aunque el navegador tuviera credenciales vacías guardadas */
-    if (!cfg.supabaseUrl) cfg.supabaseUrl = base.config.supabaseUrl;
-    if (!cfg.supabaseKey) cfg.supabaseKey = base.config.supabaseKey;
-    const merged: DB = { ...base, ...d, config: cfg };
-    /* Sanea colecciones: cualquier lista corrupta o vacía crítica vuelve a su valor base */
-    (Object.keys(base) as (keyof DB)[]).forEach((k) => {
-      if (Array.isArray(base[k]) && !Array.isArray(merged[k])) (merged as any)[k] = base[k];
-    });
-    if (merged.usuarios.length === 0) merged.usuarios = base.usuarios;
-    return merged;
+    return sanearDB(JSON.parse(raw));
   } catch { return seedDB(); }
 };
 
@@ -136,7 +147,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       if (raw) {
         const s = JSON.parse(raw) as Usuario & { verified?: boolean };
         if (s?.verified && s.id) {
-          const actual = dbRef.current?.usuarios.find((u) => u.id === s.id);
+          /* Nota: dbRef ya está inicializado (useState(db) + asignación
+             inmediata); se agrega además un guardado por si la lista de
+             usuarios llegó corrupta desde el almacenamiento */
+          const actual = (Array.isArray(dbRef.current?.usuarios) ? dbRef.current.usuarios : []).find((u) => u.id === s.id);
           if (actual && actual.activo) return actual;
           return null; // usuario eliminado o desactivado → forzar login
         }
@@ -664,7 +678,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     try {
       const d = JSON.parse(json);
       if (!d || !Array.isArray(d.estudiantes) || !d.config) return false;
-      setDb({ ...seedDB(), ...d, config: { ...seedDB().config, ...d.config } });
+      /* sanearDB garantiza todas las colecciones (evita respaldos antiguos o
+         incompletos que dejaban listas undefined y reventaban la vista) */
+      setDb(sanearDB(d));
       return true;
     } catch { return false; }
   }, []);
@@ -738,7 +754,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }, [clienteSb]);
   /* Mezcla los datos de la nube con la configuración local (preserva credenciales de conexión) */
   const aplicarNube = useCallback((nuevo: DB) => {
-    setDb((d) => ({
+    /* sanearDB por seguridad: si una tabla llegó undefined/null desde la
+       nube, se reconstruye con el valor base en vez de reventar la vista */
+    setDb((d) => sanearDB({
       ...nuevo,
       config: { ...nuevo.config, supabaseUrl: d.config.supabaseUrl, supabaseKey: d.config.supabaseKey, autoSyncCloud: d.config.autoSyncCloud },
       currentUserId: d.currentUserId,
@@ -752,7 +770,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     try {
       const { descargarTodo, rowsToDb } = await import("./supabase");
       const rows = await descargarTodo(client);
-      const nuevo = rowsToDb(rows, dbRef.current);
+      /* FALTABA EL AWAIT: rowsToDb es async — sin él se guardaba una Promise
+         como base de datos, dejando TODAS las colecciones undefined y la
+         vista reventaba con "Cannot read properties of undefined (reading 'find')" */
+      const nuevo = await rowsToDb(rows, dbRef.current);
       aplicarNube(nuevo);
       setSyncInfo({ last: Date.now(), ok: true, msg: "Base de datos restaurada desde Supabase" });
       return true;
@@ -775,7 +796,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           if (!cancelado) {
             if (nubeTieneDatos) {
               applyingRemote.current = true;
-              aplicarNube(rowsToDb(rows, dbRef.current));
+              aplicarNube(await rowsToDb(rows, dbRef.current));
               setSyncInfo({ last: Date.now(), ok: true, msg: "Datos leídos de Supabase al iniciar" });
               setTimeout(() => { applyingRemote.current = false; }, 800);
             } else {
@@ -841,7 +862,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
                 rows.usuarios = local;
               }
               applyingRemote.current = true;
-              aplicarNube(rowsToDb(rows, dbRef.current));
+              aplicarNube(await rowsToDb(rows, dbRef.current));
               setSyncInfo({ last: Date.now(), ok: true, msg: "Actualizado en tiempo real desde Supabase" });
               setTimeout(() => { applyingRemote.current = false; }, 800);
             } catch { /* noop */ }
@@ -882,8 +903,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const can = useCallback((r: Route) => {
     const rol = user?.rol || "admin";
     if (db.config.rolesActivos && db.config.rolesActivos[rol] === false) return false;
-    const rutas = db.config.rolesPermisos?.[rol] ?? ACCESOS_DEFAULT[rol];
-    return rutas.includes(r);
+    /* Respaldo doble: si el permiso guardado para el rol no es un arreglo
+       (config corrupta o rol nuevo), se usa el acceso predeterminado — así
+       nunca revienta con "reading 'includes'/'find'" */
+    const rutas = Array.isArray(db.config.rolesPermisos?.[rol]) ? db.config.rolesPermisos![rol] : ACCESOS_DEFAULT[rol];
+    return Array.isArray(rutas) && rutas.includes(r);
   }, [user, db.config.rolesPermisos, db.config.rolesActivos]);
 
   const alerts = useMemo(() => {
