@@ -81,6 +81,72 @@ export function existeColumna(client: SupabaseClient, tabla: string, col: string
   return p;
 }
 
+/* ── ADAPTADOR DE ID · public.usuarios.id puede ser uuid O text según el
+   esquema que exista en el proyecto (los esquemas reales de JyG lo tienen
+   como uuid — con FKs dependientes que NO deben cambiarse). El CRM trabaja
+   internamente con ids cortos ("u1"...); aquí se detecta el tipo real de la
+   columna y se traduce a un UUID ESTABLE derivado del id (v5 determinista),
+   de modo que la misma fila se escriba/lea siempre con la misma clave sin
+   importar desde qué dispositivo. Detección: un insert de prueba con id 'x'
+   — si PostgreSQL responde 22P02 (invalid input syntax for type uuid), la
+   columna es uuid. ─────────────────────────────────────────────────── */
+async function sha256Hex(s: string): Promise<string> {
+  try {
+    const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s));
+    return Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, "0")).join("");
+  } catch { /* navegador sin https / crypto: respaldo FNV-1a */ }
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; }
+  let out = "";
+  for (let i = 0; i < 64; i++) { h = Math.imul(h ^ (h >>> 7), 0x01000193) >>> 0; out += (h & 0xf).toString(16); }
+  return out.slice(0, 64);
+}
+export async function uuidEstable(id: string): Promise<string> {
+  const h = await sha256Hex("jyg-crm-uuid:" + String(id || ""));
+  return [h.slice(0, 8), h.slice(8, 12), "5" + h.slice(13, 16), ((parseInt(h.slice(16, 17), 16) & 0x3) | 0x8).toString(16) + h.slice(17, 20), h.slice(20, 32)].join("");
+}
+const cacheUuidId = new Map<string, Promise<boolean>>();
+export function idEsUuid(client: SupabaseClient): Promise<boolean> {
+  let p = cacheUuidId.get("usuarios");
+  if (!p) {
+    p = client.from("usuarios").insert([{ id: "__crm_tipo_probe__" }]).then(({ error }) => {
+      const e = String(error?.message || "");
+      /* 22P02 → la columna es uuid (el valor de prueba no es UUID válido).
+         Si el insert pasara (esquema laxo/text), limpiamos la fila de prueba. */
+      if (/invalid input syntax/i.test(e)) return true;
+      if (!error) void client.from("usuarios").delete().eq("id", "__crm_tipo_probe__");
+      return false;
+    });
+    cacheUuidId.set("usuarios", p);
+  }
+  return p;
+}
+/* Inverso: id de la nube → id interno. Versión SIN cliente (para rowsToDb):
+   compara contra los UUIDs estables de los ids semilla y contra el alias del
+   correo; si nada coincide, el UUID es un usuario nuevo y se conserva tal cual. */
+export async function _idLocalSeguro(nubeId: string, email?: string, usuario?: string): Promise<string> {
+  const loc = ["u1", "u2", "u3", "u4"];
+  for (const l of loc) { const c = await uuidEstable(l); if (c === nubeId) return l; }
+  const correo = String(email || "").trim().toLowerCase();
+  if (correo && correo.endsWith("@jyg.com.ve")) {
+    const alias = correo.split("@")[0];
+    if (loc.some((l) => l === alias)) return alias;
+  }
+  const usr = String(usuario || "").trim().toLowerCase();
+  if (usr && loc.some((l) => l === usr)) return usr;
+  return nubeId;
+}
+/* Traduce el id interno del CRM al formato que acepta la nube. */
+export async function idNube(client: SupabaseClient, id: string): Promise<string> {
+  return (await idEsUuid(client)) ? await uuidEstable(id) : id;
+}
+/* Inverso con cliente: id de la nube → id interno (los ids internos nunca son UUIDs). */
+const _esUuid = (s: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(s || ""));
+export async function idLocal(client: SupabaseClient, nubeId: string, email?: string, usuario?: string): Promise<string> {
+  if (!_esUuid(nubeId)) return nubeId;
+  return _idLocalSeguro(nubeId, email, usuario);
+}
+
 export async function dbToRows(client: SupabaseClient | null, db: CRMData): Promise<Record<string, any[]>> {
   const hayApellido = client ? await existeColumna(client, "estudiantes", "apellido") : false;
   const hashCol = client ? (await existeColumna(client, "usuarios", "password_hash") ? "password_hash" : "password") : "password";
@@ -106,7 +172,9 @@ export async function dbToRows(client: SupabaseClient | null, db: CRMData): Prom
     sesiones: db.sesiones.map((s) => ({ id: s.id, escuela_id: s.escuelaId || null, fecha: s.fecha, hora: s.hora, fotografo: s.fotografo, estado: s.estado, fotos: s.fotos, nota: s.nota })),
     eventos: db.eventos.map((e) => ({ id: e.id, fecha: e.fecha, hora: e.hora, titulo: e.titulo, tipo: e.tipo, escuela_id: e.escuelaId || null })),
     mensajes: db.mensajes.map((m) => ({ id: m.id, fecha: m.fecha, destinatario: m.destinatario, telefono: m.telefono, plantilla: m.plantilla, texto: m.texto })),
-    usuarios: db.usuarios.map((u) => { const r: any = { id: u.id, nombre: u.nombre, email: u.email || "", rol: u.rol, activo: u.activo, [hashCol]: authActiva ? "" : cifrarPass(u.password || "") }; if (usuarioCol) r.usuario = u.usuario; return r; }),
+    /* El id se traduce al tipo real de la columna (uuid o text): los ids
+       cortos "u1..." rompen esquemas uuid con 22P02 — ver uuidEstable(). */
+    usuarios: await Promise.all(db.usuarios.map(async (u) => { const r: any = { id: client ? await idNube(client, u.id) : u.id, nombre: u.nombre, email: u.email || "", rol: u.rol, activo: u.activo, [hashCol]: authActiva ? "" : cifrarPass(u.password || "") }; if (usuarioCol) r.usuario = u.usuario; return r; })),
     historial_tasas: db.historialTasas.map((h) => ({ id: h.id, fecha: h.fecha, usd: h.usd, euro: h.euro, paralelo: h.paralelo, fuente: h.fuente, actualizado: h.actualizado })),
     paquetes_escuelas: db.paquetesEscuelas.map((p) => ({ id: p.id, escuela_id: p.escuelaId, nombre: p.nombre, tipo_paquete_id: p.tipoPaqueteId, precio: p.precio, articulos: p.articulos, nota: p.nota, activo: p.activo, creado: p.creado })),
     facturas: (db.facturas || []).map((f) => ({ id: f.id, numero: f.numero, estudiante_id: f.estudianteId, estudiante: f.estudiante, fecha: f.fecha, total: f.total, accion: f.accion })),
@@ -117,7 +185,7 @@ export async function dbToRows(client: SupabaseClient | null, db: CRMData): Prom
   };
 }
 
-export function rowsToDb(rows: Record<string, any[]>, base: CRMData): CRMData {
+export async function rowsToDb(rows: Record<string, any[]>, base: CRMData): Promise<CRMData> {
   const estudiantes: Estudiante[] = (rows.estudiantes || []).map((r) => {
     const x = r.extra || {};
     const nombreCompleto = [r.nombre || "", r.apellido || ""].filter(Boolean).join(" ") || x.nombreCompleto || "";
@@ -147,9 +215,10 @@ export function rowsToDb(rows: Record<string, any[]>, base: CRMData): CRMData {
     sesiones: (rows.sesiones || []).map((s) => ({ id: s.id, escuelaId: s.escuela_id || "", fecha: s.fecha || "", hora: s.hora || "", fotografo: s.fotografo || "", estado: s.estado || "Agendada", fotos: Number(s.fotos) || 0, nota: s.nota || "" })),
     eventos: (rows.eventos || []).map((e) => ({ id: e.id, fecha: e.fecha || "", hora: e.hora || "", titulo: e.titulo || "", tipo: e.tipo || "otro", escuelaId: e.escuela_id || undefined })),
     mensajes: (rows.mensajes || []).map((m) => ({ id: m.id, fecha: m.fecha || "", destinatario: m.destinatario || "", telefono: m.telefono || "", plantilla: m.plantilla || "", texto: m.texto || "" })),
-    /* Si la nube no tiene usuarios, se conservan los locales para que siempre exista un usuario activo */
+    /* Si la nube no tiene usuarios, se conservan los locales para que siempre exista un usuario activo.
+       El id de la nube (uuid en esquemas uuid) se traduce de vuelta al id interno del CRM. */
     usuarios: (rows.usuarios || []).length > 0
-      ? (rows.usuarios || []).map((u) => ({ id: u.id, nombre: u.nombre || "Usuario", usuario: u.usuario || "", email: u.email || "", password: descifrarPass(u.password || u.password_hash || ""), rol: u.rol || "operador", activo: u.activo !== false }))
+      ? await Promise.all((rows.usuarios || []).map(async (u) => ({ id: _esUuid(u.id) ? await _idLocalSeguro(u.id, u.email, u.usuario) : u.id, nombre: u.nombre || "Usuario", usuario: u.usuario || "", email: u.email || "", password: descifrarPass(u.password || u.password_hash || ""), rol: u.rol || "operador", activo: u.activo !== false })))
       : base.usuarios,
     historialTasas: (rows.historial_tasas || []).map((h) => ({ id: h.id, fecha: h.fecha, usd: Number(h.usd), euro: Number(h.euro), paralelo: Number(h.paralelo), fuente: h.fuente || "dolarapi", actualizado: Number(h.actualizado) || 0 })),
     paquetesEscuelas: (rows.paquetes_escuelas || []).map((p) => ({ id: p.id, escuelaId: p.escuela_id || "", nombre: p.nombre || "", tipoPaqueteId: p.tipo_paquete_id || "personalizado", precio: Number(p.precio) || 0, articulos: p.articulos || [], nota: p.nota || "", activo: !!p.activo, creado: p.creado || "" })),
@@ -319,20 +388,21 @@ export async function subirTodo(client: SupabaseClient, db: CRMData, onTabla?: (
 export async function subirUsuarioInmediato(client: SupabaseClient, u: Usuario): Promise<{ ok: boolean; error?: string }> {
   const hashCol = await existeColumna(client, "usuarios", "password_hash") ? "password_hash" : "password";
   const usuarioCol = await existeColumna(client, "usuarios", "usuario");
-  let fila: any = { id: u.id, nombre: u.nombre || "Usuario", email: u.email || "", rol: u.rol, activo: u.activo, [hashCol]: cifrarPass(u.password || "") };
+  const idN = await idNube(client, u.id); /* uuid o text según el esquema real */
+  let fila: any = { id: idN, nombre: u.nombre || "Usuario", email: u.email || "", rol: u.rol, activo: u.activo, [hashCol]: cifrarPass(u.password || "") };
   if (usuarioCol) fila.usuario = u.usuario || "";
   /* Quitar columnas que el esquema de la nube no conoce */
   const invalidas = await columnasNoValidas(client, "usuarios");
   if (invalidas) fila = Object.fromEntries(Object.entries(fila).filter(([k]) => !invalidas.includes(k)));
   /* Merge con lo que ya existe en la nube (no pisamos campos que no enviamos) */
-  const { data: existente } = await client.from("usuarios").select("*").eq("id", u.id).maybeSingle();
+  const { data: existente } = await client.from("usuarios").select("*").eq("id", idN).maybeSingle();
   const merged = existente ? { ...existente, ...fila } : fila;
   const r = await client.from("usuarios").upsert([merged], { onConflict: "id" });
   return { ok: !r.error, error: r.error?.message };
 }
 
 export async function eliminarUsuarioInmediato(client: SupabaseClient, id: string): Promise<{ ok: boolean; error?: string }> {
-  const r = await client.from("usuarios").delete().eq("id", id);
+  const r = await client.from("usuarios").delete().eq("id", await idNube(client, id));
   return { ok: !r.error, error: r.error?.message };
 }
 
@@ -392,10 +462,11 @@ export async function upsertAuthUser(
     });
     if (error) return { ok: false, error: error.message };
     if (opts.crearFila) {
-      /* Espejo en la tabla pública SIN contraseña (la clave vive en Auth) */
+      /* Espejo en la tabla pública SIN contraseña (la clave vive en Auth).
+         El id se escribe en el tipo real de la columna (uuid o text). */
       const hashCol = await existeColumna(client, "usuarios", "password_hash") ? "password_hash" : "password";
       const usuarioCol = await existeColumna(client, "usuarios", "usuario");
-      let fila: any = { id: u.id, nombre: u.nombre, email: u.email, rol: u.rol, activo: u.activo, [hashCol]: "" };
+      let fila: any = { id: await idNube(client, u.id), nombre: u.nombre, email: u.email, rol: u.rol, activo: u.activo, [hashCol]: "" };
       if (usuarioCol) fila.usuario = u.usuario || "";
       const invalidas = await columnasNoValidas(client, "usuarios");
       if (invalidas) fila = Object.fromEntries(Object.entries(fila).filter(([k]) => !invalidas.includes(k)));
@@ -532,6 +603,7 @@ export async function sincronizarAuthMasivo(
     return { ...res, errores: [`Sin acceso a supabase.auth (service role): ${e?.message || e}`] };
   }
   const hashCol = await existeColumna(client, "usuarios", "password_hash") ? "password_hash" : "password";
+  const esUuid = await idEsUuid(client);
   for (const u of usuarios) {
     const email = (u.email || "").trim().toLowerCase();
     if (!email) { res.omitidos++; continue; } /* sin correo no puede haber Auth real */
@@ -549,20 +621,29 @@ export async function sincronizarAuthMasivo(
         registrarPassCambio(u.id);
         res.actualizados++;
       } else {
-        const { error } = await client.auth.admin.createUser({
+        const { data: creado, error } = await client.auth.admin.createUser({
           email, password: passPlana, email_confirm: true,
           user_metadata: { nombre: u.nombre, usuario: u.usuario, rol: u.rol },
         });
         if (error) { res.errores.push(`${u.nombre}: ${error.message}`); continue; }
+        /* Fuente de verdad para RLS: en esquemas uuid el espejo debe llevar
+           el MISMO id que auth.users (auth.uid()); un uuid derivado 'u1' no
+           coincidiría nunca con la sesión y bloquearía el acceso. */
+        if (esUuid && creado?.user?.id) {
+          const fila: any = { id: String(creado.user.id), nombre: u.nombre, usuario: u.usuario || "", email, rol: u.rol, activo: u.activo, [hashCol]: "" };
+          const invalidas = await columnasNoValidas(client, "usuarios");
+          const limpioFila = invalidas ? Object.fromEntries(Object.entries(fila).filter(([k]) => !invalidas.includes(k))) : fila;
+          await client.from("usuarios").upsert([limpioFila], { onConflict: "id" });
+        }
         registrarPassCambio(u.id);
         res.creados++;
       }
       /* Fuente de verdad = auth.users: la tabla espejo queda SIN secreto */
       if (opts.limpiarEspejo) {
         const invalidas = await columnasNoValidas(client, "usuarios");
-        const fila: any = { id: u.id, [hashCol]: "" };
+        const fila: any = { id: esUuid && existente ? String(existente.id) : await idNube(client, u.id), [hashCol]: "" };
         const limpio = Object.fromEntries(Object.entries(fila).filter(([k]) => !invalidas.includes(k)));
-        await client.from("usuarios").update(limpio).eq("id", u.id);
+        await client.from("usuarios").update(limpio).eq("id", esUuid && existente ? String(existente.id) : await idNube(client, u.id));
       }
     } catch (e: any) {
       res.errores.push(`${u.nombre}: ${e?.message || e}`);
